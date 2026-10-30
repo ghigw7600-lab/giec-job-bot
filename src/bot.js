@@ -247,17 +247,40 @@ bot.on("chat_join_request", async (ctx) => {
   await ctx.api.approveChatJoinRequest(req.chat.id, req.from.id).catch((e) => console.error("승인 실패:", e.description));
 });
 
-// 봇이 채널 관리자로 추가됨 → 채널 기억 + 관리자에게 알림
+// 채널·그룹 (GIEC JOB 방은 그룹일 수도 있음)
+const ROOM_TYPES = ["channel", "group", "supergroup"];
+async function rememberRoom(api, chat) {
+  const ch = await kv.get(K.channel);
+  if (ch && Number(ch.id) === chat.id) return;
+  await kv.set(K.channel, { id: chat.id, title: chat.title, type: chat.type });
+  for (const admin of adminIds()) {
+    await api
+      .sendMessage(admin, `✅ 「${esc(chat.title)}」에 봇이 관리자로 연결됐어요.\n이제 /joinlink 로 환영 링크를 받으세요.`, html)
+      .catch(() => {});
+  }
+}
+
+// 봇이 채널·그룹 관리자로 추가됨 → 기억 + 관리자에게 알림
 bot.on("my_chat_member", async (ctx) => {
   const chat = ctx.myChatMember.chat;
   const status = ctx.myChatMember.new_chat_member.status;
-  if (chat.type !== "channel" || status !== "administrator") return;
-  await kv.set(K.channel, { id: chat.id, title: chat.title });
-  for (const admin of adminIds()) {
-    await ctx.api
-      .sendMessage(admin, `✅ 채널 「${esc(chat.title)}」에 봇이 관리자로 연결됐어요.\n이제 /joinlink 로 환영 링크를 받으세요.`, html)
-      .catch(() => {});
+  if (!ROOM_TYPES.includes(chat.type) || status !== "administrator") return;
+  await rememberRoom(ctx.api, chat);
+});
+
+// 그룹 안의 메시지
+//  - 아직 방을 모르면: 관리자가 그룹에 아무 글이나 쓰면 그 그룹을 기억
+//  - "○○님이 들어왔습니다/나갔습니다" 알림은 봇이 바로 지움 (다른 학생들 대화방을 깨끗하게)
+bot.on("message", async (ctx, next) => {
+  const chat = ctx.chat;
+  if (chat?.type !== "group" && chat?.type !== "supergroup") return next();
+  const m = ctx.message;
+  if (m.new_chat_members || m.left_chat_member) {
+    await ctx.deleteMessage().catch(() => {});
+    return;
   }
+  const ch = await kv.get(K.channel);
+  if (!ch && isAdmin(ctx.from?.id)) await rememberRoom(ctx.api, chat);
 });
 
 const pm = bot.filter((ctx) => ctx.chat?.type === "private");
@@ -292,7 +315,7 @@ admin.command("help", (ctx) => ctx.reply(HELP, html));
 
 admin.command("joinlink", async (ctx) => {
   const ch = await kv.get(K.channel);
-  if (!ch) return ctx.reply("⚠️ 아직 채널을 몰라요. 채널 → 관리자 → @GIEC_JOB_bot 을 관리자로 추가해 주세요 (사용자 초대 권한 켜기).");
+  if (!ch) return ctx.reply("⚠️ 아직 방을 몰라요. GIEC JOB 그룹(채널)에 @GIEC_JOB_bot 을 관리자로 추가한 뒤, 그 방에 아무 글이나 한 줄 써 주세요 (예: 안녕). 봇이 그 방을 기억해요.");
   const fresh = String(ctx.match ?? "").trim() === "new";
   let link = fresh ? null : await kv.get(K.joinlink);
   if (!link) {
@@ -319,7 +342,7 @@ admin.command("joinlink", async (ctx) => {
 
 admin.command("pinpost", async (ctx) => {
   const ch = await kv.get(K.channel);
-  if (!ch) return ctx.reply("⚠️ 아직 채널을 몰라요. 먼저 봇을 채널 관리자로 추가해 주세요.");
+  if (!ch) return ctx.reply("⚠️ 아직 방을 몰라요. 먼저 /joinlink 안내대로 방을 연결해 주세요.");
   try {
     const msg = await ctx.api.sendMessage(ch.id, tx("uz", "pinPost"), {
       ...html,
