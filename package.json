@@ -1,0 +1,13 @@
+{
+  "name": "giec-job-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "grammy": "^1.30.0",
+    "redis": "^6.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
