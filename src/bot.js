@@ -329,7 +329,8 @@ bot.on("message", async (ctx, next) => {
   if (chat?.type !== "group" && chat?.type !== "supergroup") return next();
   const m = ctx.message;
   if (m.new_chat_members || m.left_chat_member) {
-    await ctx.deleteMessage().catch(() => {});
+    // (2026-11-02 대표·혜승 결정) 참여·퇴장 알림은 지우지 않음 — 누가 들어왔는지 보이게. 다시 켜려면 HIDE_JOINS=1
+    if (process.env.HIDE_JOINS === "1") await ctx.deleteMessage().catch(() => {});
     // 안전망: 봇 환영 링크가 아닌 다른 링크로 들어온 학생(봇이 1:1 인사를 못 보낸 학생)
     //  → 그룹에 조용히(알림 없이) 이름을 불러 [정보 남기기] 버튼 → 10분 뒤 자동으로 지움
     // (2026-11-02 대표 결정: 끔 — 고정글로 충분. 다시 켜려면 GROUP_HELLO=1 환경변수)
