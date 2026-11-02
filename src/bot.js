@@ -1,9 +1,9 @@
 // ═════════════════════════════════════════════════════════════
 //  GIEC JOB 봇 (@GIEC_JOB_bot)
 //
-//  흐름: 채널 가입 요청 → 봇이 1:1 인사 + 자동 승인 → 8단계 입력 → 혜승에게 카드
-//   1 이름(입력) 2 나이(입력) 3 연락처(버튼, 한국 번호 아니면 010 입력)
-//   4 학교(입력) 5 TOPIK 6 IELTS 7 자동차 8 수업 요일(여러 개 선택)
+//  흐름: 채널 가입 요청 → 봇이 1:1 인사 + 자동 승인 → 9단계 입력 → 혜승에게 카드
+//   1 이름(입력) 2 나이(입력) 3 성별 4 연락처(버튼, 한국 번호 아니면 010 입력)
+//   5 학교(입력) 6 TOPIK 7 IELTS 8 자동차 9 수업 요일(여러 개 선택)
 //
 //  관리자(ADMIN_IDS, 기본 = 혜승) 명령어 — 봇과의 1:1 대화에서
 //   /joinlink  채널 환영 링크(가입 요청 링크) 받기   · /joinlink new 새로 만들기
@@ -103,6 +103,8 @@ async function ask(ctx, st) {
       return ctx.reply(tx(lang, "name"), { ...html, reply_markup: { remove_keyboard: true } });
     case "age":
       return ctx.reply(tx(lang, "age"), html);
+    case "gender":
+      return ctx.reply(tx(lang, "gender"), { ...html, reply_markup: opts("genderOpts", "gender") });
     case "phone":
       return ctx.reply(tx(lang, "phone"), {
         ...html,
@@ -138,7 +140,7 @@ async function startFlow(ctx, lang) {
   return ask(ctx, st);
 }
 
-const next = { name: "age", age: "phone", phone: "school", phoneText: "school", school: "topik", topik: "ielts", ielts: "car", car: "days" };
+const next = { name: "age", age: "gender", gender: "phone", phone: "school", phoneText: "school", school: "topik", topik: "ielts", ielts: "car", car: "days" };
 async function goNext(ctx, st) {
   st.step = next[st.step];
   await setState(ctx.from.id, st);
@@ -252,7 +254,7 @@ export function cardText(app, title) {
     `<b>${title}</b>`,
     line,
     `👤 이름: <b>${esc(app.name)}</b>`,
-    `🎂 나이: ${esc(app.age)}`,
+    `🎂 나이: ${esc(app.age)} · ${KO.gender[app.gender] ?? "성별 미입력"}`,
     `📞 연락처: ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`,
     `🏫 학교: ${esc(app.school)}`,
     `📝 TOPIK: ${KO.topik[app.topik] ?? "-"}`,
@@ -505,11 +507,12 @@ admin.command("export", async (ctx) => {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const rows = [
-    ["접수일", "이름", "나이", "연락처", "학교", "TOPIK", "IELTS", "자동차", "수업 요일", "텔레그램 이름", "아이디", "상태", "텔레그램 번호"],
+    ["접수일", "이름", "나이", "성별", "연락처", "학교", "TOPIK", "IELTS", "자동차", "수업 요일", "텔레그램 이름", "아이디", "상태", "텔레그램 번호"],
     ...apps.map((a) => [
       nowKST(a.createdAt),
       a.name,
       a.age,
+      KO.gender[a.gender] ?? "",
       a.phone ?? "없음",
       a.school,
       KO.topik[a.topik],
@@ -536,15 +539,31 @@ bot.callbackQuery("c:go", async (ctx) => {
 });
 
 // 예전에 낸 학생: "또 일 찾아요" — 정보는 그대로, 상태만 🆕 신규로
+async function reactivate(ctx, app) {
+  const before = STATUS[app.status] ?? STATUS.new;
+  const updated = { ...app, status: "new", statusBy: null, statusAt: null, updatedAt: Date.now(), againAt: Date.now() };
+  await ctx.reply(tx(app.lang, "again"));
+  return saveAndCard(ctx.api, updated, `🔁 다시 일 찾는 중 (이전: ${before})`);
+}
 bot.callbackQuery("c:again", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
   const app = await kv.get(K.app(ctx.from.id));
   if (!app) return startFlow(ctx, langOf(ctx.from.language_code));
-  const before = STATUS[app.status] ?? STATUS.new;
-  const updated = { ...app, status: "new", statusBy: null, statusAt: null, updatedAt: Date.now(), againAt: Date.now() };
-  await ctx.reply(tx(app.lang, "again"));
-  return saveAndCard(ctx.api, updated, `🔁 다시 일 찾는 중 (이전: ${before})`);
+  if (app.gender == null) {
+    // 예전에 성별 없이 낸 학생 → 성별만 한 번 묻고 다시 신청
+    const kb = new InlineKeyboard();
+    tx(app.lang, "genderOpts").forEach((l, i) => kb.text(l, `c:ag:${i}`));
+    return ctx.reply(tx(app.lang, "genderOnly"), { ...html, reply_markup: kb });
+  }
+  return reactivate(ctx, app);
+});
+bot.callbackQuery(/^c:ag:(\d)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  const app = await kv.get(K.app(ctx.from.id));
+  if (!app) return;
+  return reactivate(ctx, { ...app, gender: Number(ctx.match[1]) });
 });
 
 // 이어서 하기 (알림 버튼)
@@ -557,7 +576,7 @@ bot.callbackQuery("c:resume", async (ctx) => {
   return ask(ctx, st);
 });
 
-bot.callbackQuery(/^c:(topik|ielts|car):(\d)$/, async (ctx) => {
+bot.callbackQuery(/^c:(topik|ielts|car|gender):(\d)$/, async (ctx) => {
   const st = await getState(ctx.from.id);
   const [, key, val] = ctx.match;
   if (!st || st.step !== key) return ctx.answerCallbackQuery();
@@ -625,7 +644,7 @@ bot.callbackQuery(/^a:days:(\d+)$/, async (ctx) => {
 //        → ③ [✍️ 공고 쓰기] → 공고 한 개 보내기 → 미리보기
 //        → ④ 어디로: [👥 그룹방] [📩 찾은 학생 1:1] [👥+📩 둘 다]
 //  "일할 수 있는 날" = 그날 수업이 없는 학생 (일요일은 모두). ⚫ 종결·관리자 테스트 제외
-//  그룹방 공고의 [🙋 지원하기] → 봇 1:1로 이동 → 정보를 낸 학생이면 바로 지원, 처음이면 8단계 후 자동 지원
+//  그룹방 공고의 [🙋 지원하기] → 봇 1:1로 이동 → 정보를 낸 학생이면 바로 지원, 처음이면 9단계 후 자동 지원
 //  공고마다 [🔒 마감] → 그룹방 공고에 "마감" 표시 + 버튼 없앰
 const WD = ["월", "화", "수", "목", "금", "토", "일"];
 const kstDate = (off = 0) => new Date(Date.now() + 9 * 3600e3 + off * DAY);
@@ -641,7 +660,9 @@ const TOPIK_MIN = [["상관없음", 0], ["1급↑", 1], ["3급↑", 2], ["4급�
 const topikName = (v) => TOPIK_MIN.find((t) => t[1] === v)?.[0] ?? "상관없음";
 const mark = (on, label) => (on ? `✅ ${label}` : label);
 
-const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false });
+const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null });
+const GENDER = [["성별 상관없음", null], ["남자만", 0], ["여자만", 1]];
+const genderName = (g) => GENDER.find((x) => x[1] === (g ?? null))[0];
 const findDayLabel = (f) => (f.off == null ? "날짜 상관없음" : `${f.off === 0 ? "오늘 " : f.off === 1 ? "내일 " : ""}${dateLabel(f.off)}`);
 const findText = (f) =>
   [
@@ -650,6 +671,7 @@ const findText = (f) =>
     `📅 일할 날: <b>${findDayLabel(f)}</b>`,
     `📝 TOPIK: <b>${topikName(f.topik)}</b>`,
     `🚗 차: <b>${f.car ? "있어야 함" : "상관없음"}</b>`,
+    `🚻 성별: <b>${genderName(f.gender)}</b>`,
   ].join("\n");
 const findKeyboard = (f) => {
   const kb = new InlineKeyboard();
@@ -663,7 +685,8 @@ const findKeyboard = (f) => {
     kb.row().text(mark(f.off == null, "날짜 상관없음"), "f:o:any").row();
   }
   TOPIK_MIN.forEach(([n, v]) => kb.text(mark(f.topik === v, n), `f:t:${v}`));
-  kb.row().text(mark(!f.car, "차 상관없음"), "f:c:0").text(mark(f.car, "차 있어야 함"), "f:c:1");
+  kb.row().text(mark(!f.car, "차 상관없음"), "f:c:0").text(mark(f.car, "차 있어야 함"), "f:c:1").row();
+  GENDER.forEach(([n, v]) => kb.text(mark((f.gender ?? null) === v, n), `f:g:${v ?? "any"}`));
   return kb.row().text("🔎 찾기", "f:go");
 };
 
@@ -681,7 +704,7 @@ bot.callbackQuery(/^f:k:(urgent|normal)$/, async (ctx) => {
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
 
-bot.callbackQuery(/^f:(o|t|c):(\w+)$/, async (ctx) => {
+bot.callbackQuery(/^f:(o|t|c|g):(\w+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
@@ -689,6 +712,7 @@ bot.callbackQuery(/^f:(o|t|c):(\w+)$/, async (ctx) => {
   if (k === "o") f.off = v === "any" ? null : Number(v);
   if (k === "t") f.topik = Number(v);
   if (k === "c") f.car = v === "1";
+  if (k === "g") f.gender = v === "any" ? null : Number(v);
   await kv.set(findKey(ctx.from.id), f, FIND_TTL);
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
@@ -699,13 +723,13 @@ export async function findStudents(f) {
   const ids = (await kv.smembers(K.apps)) ?? [];
   return (await kv.mget(ids.map(K.app)))
     .filter((a) => a && !a.test && !isAdmin(a.id) && a.status !== "closed")
-    .filter((a) => freeOn(a, day) && (a.topik ?? 0) >= f.topik && (!f.car || a.car === 0))
+    .filter((a) => freeOn(a, day) && (a.topik ?? 0) >= f.topik && (!f.car || a.car === 0) && (f.gender == null || a.gender === f.gender))
     .sort((a, b) => (b.topik ?? 0) - (a.topik ?? 0) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 
 const LIST_MAX = 30;
 const studentLine = (a, i) =>
-  `${i + 1}. <a href="tg://user?id=${a.id}">${esc(a.name)}</a> · ${esc(a.age)} · ${a.phone ? `<code>${esc(a.phone)}</code>` : "번호 없음"} · ${esc(a.school)} · TOPIK ${KO.topik[a.topik] ?? "-"}${a.car === 0 ? " · 🚗" : ""}${a.status === "introduced" ? " · 🟢" : ""}`;
+  `${i + 1}. <a href="tg://user?id=${a.id}">${esc(a.name)}</a> · ${KO.gender[a.gender] ?? "성별?"} ${esc(a.age)}세 · ${a.phone ? `<code>${esc(a.phone)}</code>` : "번호 없음"} · ${esc(a.school)} · TOPIK ${KO.topik[a.topik] ?? "-"}${a.car === 0 ? " · 🚗" : ""}${a.status === "introduced" ? " · 🟢" : ""}`;
 
 bot.callbackQuery("f:go", async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
@@ -713,25 +737,35 @@ bot.callbackQuery("f:go", async (ctx) => {
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
   const list = await findStudents(f);
   await kv.set(findKey(ctx.from.id), { ...f, ids: list.map((a) => a.id) }, FIND_TTL);
-  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · 차 ${f.car ? "있어야 함" : "상관없음"}`;
+  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · 차 ${f.car ? "있어야 함" : "상관없음"} · ${genderName(f.gender)}`;
   const lines = list.slice(0, LIST_MAX).map(studentLine);
   if (list.length > LIST_MAX) lines.push(`… 외 ${list.length - LIST_MAX}명`);
+  if (f.gender != null) {
+    const unknown = (await findStudents({ ...f, gender: null })).filter((a) => a.gender == null).length;
+    if (unknown) lines.push(`ℹ️ 성별을 입력하기 전에 정보를 낸 학생 ${unknown}명은 빠졌어요 (다시 신청하면 성별을 물어봐요)`);
+  }
   return ctx.reply(
     [head, "", ...(lines.length ? lines : ["(맞는 학생이 없어요 — 그룹방에만 올려도 돼요)"]), "", "🚗 = 차 있음 · 🟢 = 이미 일 소개받은 학생 · 이름을 누르면 대화로 가요."].join("\n"),
-    { ...html, link_preview_options: { is_disabled: true }, reply_markup: new InlineKeyboard().text("✍️ 공고 쓰기", "p:new") }
+    { ...html, link_preview_options: { is_disabled: true }, reply_markup: whereKeyboard(list.length) }
   );
 });
 
-// 공고 쓰기
-bot.callbackQuery("p:new", async (ctx) => {
+// 어디로 보낼지 → 공고 쓰기
+const WHERE = { g: "👥 그룹방", d: "📩 찾은 학생 1:1", b: "👥 그룹방 + 📩 1:1" };
+function whereKeyboard(n) {
+  const kb = new InlineKeyboard().text("✍️ 👥 그룹방에 올릴 공고 쓰기", "p:new:g").row();
+  if (n) kb.text(`✍️ 📩 이 ${n}명에게 1:1 공고 쓰기`, "p:new:d").row().text(`✍️ 👥 + 📩 둘 다`, "p:new:b");
+  return kb;
+}
+bot.callbackQuery(/^p:new:(g|d|b)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
   const f = await kv.get(findKey(ctx.from.id));
   if (!f) return ctx.reply("찾기 조건이 사라졌어요. /find 부터 다시 해주세요.");
-  await kv.set(postKey(ctx.from.id), { step: "text" }, 1800);
+  await kv.set(postKey(ctx.from.id), { step: "text", where: ctx.match[1] }, 1800);
   return ctx.reply(
     [
-      "✍️ <b>공고 내용을 메시지 한 개로 보내주세요</b> (글, 또는 사진 + 설명)",
+      `✍️ <b>${WHERE[ctx.match[1]]}</b> — 공고 내용을 메시지 한 개로 보내주세요 (글, 또는 사진 + 설명)`,
       "지금 그룹방에 올리는 모양 그대로 쓰면 돼요. 예)",
       "<code>365로지스 / 4명\n단순 하차 업무\n위치 : 일산 설문동 606\n근무시간 : 7시-12시\n시급 : 11,000원</code>",
       "",
@@ -804,17 +838,21 @@ admin.on("message", async (ctx, next) => {
     at: Date.now(),
   };
   await kv.set(`job:${jobId}`, job, 60 * 24 * 3600);
-  await kv.set(postKey(ctx.from.id), { step: "confirm", jobId }, 1800);
-  await ctx.reply("👀 <b>그룹방에는 이렇게 올라가요</b>", html);
-  await sendTo(ctx.api, ctx.chat.id, job, groupBody(job), groupMarkup(ctx.me.username, jobId));
+  await kv.set(postKey(ctx.from.id), { step: "confirm", jobId, where: p.where ?? "g" }, 1800);
+  const where = p.where ?? "g";
   const n = job.ids.length;
-  const kb = new InlineKeyboard().text("👥 그룹방에 올리기", `p:send:${jobId}:g`).row();
-  if (n) kb.text(`📩 찾은 ${n}명에게 1:1`, `p:send:${jobId}:d`).row().text(`👥 + 📩 둘 다`, `p:send:${jobId}:b`).row();
-  kb.text("❌ 취소", "p:cancel");
-  return ctx.reply(
-    `📢 공고 #${jobId} — 어디로 보낼까요?\n\n👥 그룹방: 모두가 봐요. 지원 버튼을 누르면 봇으로 와요.\n📩 1:1: 조건에 맞는 학생에게만 개인 메시지로 가요 (알림이 확실히 감).${n ? "" : "\n(조건에 맞는 학생이 없어서 1:1은 없어요)"}`,
-    { reply_markup: kb }
-  );
+  if (where !== "d") {
+    await ctx.reply("👀 <b>그룹방에는 이렇게 올라가요</b>", html);
+    await sendTo(ctx.api, ctx.chat.id, job, groupBody(job), groupMarkup(ctx.me.username, jobId));
+  }
+  if (where !== "g") {
+    await ctx.reply("👀 <b>1:1로는 이렇게 가요</b>", html);
+    await sendTo(ctx.api, ctx.chat.id, job, dmBody(job, "uz"), dmMarkup("uz", jobId));
+  }
+  const target = where === "g" ? "그룹방에 올릴까요?" : where === "d" ? `${n}명에게 1:1로 보낼까요?` : `그룹방에 올리고 ${n}명에게 1:1로도 보낼까요?`;
+  return ctx.reply(`📢 공고 #${jobId} — ${target}`, {
+    reply_markup: new InlineKeyboard().text("✅ 보내기", `p:send:${jobId}:${where}`).text("❌ 취소", "p:cancel"),
+  });
 });
 
 bot.callbackQuery("p:cancel", async (ctx) => {
