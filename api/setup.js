@@ -1,6 +1,6 @@
 // 처음 한 번만: 브라우저로 https://<봇 주소>/api/setup?key=<WEBHOOK_SECRET> 열기
 //  → 웹훅 연결 + 봇 소개문·명령어 설정 (컴퓨터에 아무것도 설치할 필요 없음)
-import { bot, ALLOWED_UPDATES } from "../src/bot.js";
+import { bot, ALLOWED_UPDATES, ADMIN_COMMANDS } from "../src/bot.js";
 
 export default async function handler(req, res) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -23,12 +23,7 @@ export default async function handler(req, res) {
     for (const id of admins) {
       await api
         .setMyCommands(
-          [
-            { command: "joinlink", description: "채널 환영 링크" },
-            { command: "pinpost", description: "채널에 정보 남기기 버튼 글 고정" },
-            { command: "export", description: "지원자 엑셀(CSV)" },
-            { command: "help", description: "도움말" },
-          ],
+          ADMIN_COMMANDS,
           { scope: { type: "chat", chat_id: Number(id) } }
         )
         .then(() => done.push(`✅ 관리자 메뉴 (${id})`))

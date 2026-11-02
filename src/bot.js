@@ -10,6 +10,7 @@
 //   /pinpost   채널에 "정보 남기기" 버튼 글 올리고 고정 (이미 채널에 있는 학생용)
 //   /export    지원자 전체 엑셀(CSV) 받기 (관리자 테스트 기록은 빠짐)
 //   /reset     내 테스트 기록 지우기 · /delete 숫자ID  학생 정보 지우기
+//   /find      학생 찾기 (일할 날·TOPIK·차) → 공고 보내기 · /cancel 공고 쓰기 취소
 //   /help      도움말
 // ═════════════════════════════════════════════════════════════
 import { Bot, InlineKeyboard, Keyboard, InputFile } from "grammy";
@@ -25,11 +26,23 @@ bot.use(async (ctx, next) => {
   const id = ctx.update.update_id;
   if (id != null && !(await kv.setNX(`upd:${id}`, 1, 600).catch(() => true))) return;
   await next();
+  // 관리자 메뉴(입력창 / 목록)를 새 명령어로 한 번 갱신
+  if (await kv.setNX("cmds:v2", 1, 365 * 24 * 3600).catch(() => false)) await setAdminCommands(ctx.api).catch(() => {});
   // 10분에 한 번, 들어온 메시지를 처리하는 김에 "이어서 하기" 알림도 확인 (따로 예약 서비스 필요 없음)
   if (await kv.setNX("remind:lock", 1, 600).catch(() => false)) await runReminders(ctx.api).catch((e) => console.error("알림 실패:", e.message));
 });
 
 // ── 관리자 ──
+export const ADMIN_COMMANDS = [
+  { command: "find", description: "학생 찾기 → 공고 보내기" },
+  { command: "joinlink", description: "그룹 환영 링크" },
+  { command: "pinpost", description: "정보 남기기 버튼 글 고정" },
+  { command: "export", description: "지원자 엑셀(CSV)" },
+  { command: "help", description: "도움말" },
+];
+async function setAdminCommands(api) {
+  for (const id of adminIds()) await api.setMyCommands(ADMIN_COMMANDS, { scope: { type: "chat", chat_id: id } }).catch(() => {});
+}
 const adminIds = () =>
   (process.env.ADMIN_IDS || "8512697683")
     .split(",")
@@ -196,14 +209,25 @@ async function finish(ctx, st) {
     lang: st.lang,
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,
-    status: prev ? prev.status ?? "new" : "new",
+    status: "new", // 다시 냈다 = 지금 일을 찾는 중
+    statusBy: null,
+    statusAt: null,
     test: isAdmin(id), // 관리자가 직접 해본 기록 → 엑셀에서 빠짐
   };
-  await kv.set(K.app(id), app);
-  await kv.sadd(K.apps, id);
   await clearState(id);
   await ctx.reply(tx(st.lang, "done"), { reply_markup: { remove_keyboard: true } });
-  return notifyAdmins(ctx.api, app, `${app.test ? "🧪 테스트 · " : ""}${prev ? "✏️ 정보 수정" : "🆕 새 지원자"}`);
+  const title = prev ? `✏️ 다시 신청 (이전: ${STATUS[prev.status] ?? STATUS.new})` : "🆕 새 지원자";
+  return saveAndCard(ctx.api, app, `${app.test ? "🧪 테스트 · " : ""}${title}`);
+}
+
+// 저장 + 카드 (같은 학생 카드는 하루(24시간)에 한 번만 — 그만두고 또 신청하는 학생이 많아서)
+const DAY = 24 * 3600 * 1000;
+async function saveAndCard(api, app, title) {
+  const recent = app.lastCardAt && Date.now() - app.lastCardAt < DAY;
+  if (!recent) app.lastCardAt = Date.now();
+  await kv.set(K.app(app.id), app);
+  await kv.sadd(K.apps, app.id);
+  if (!recent) await notifyAdmins(api, app, title);
 }
 
 // ═════════════ 관리자 카드 ═════════════
@@ -314,7 +338,9 @@ pm.command("start", async (ctx) => {
   await clearState(ctx.from.id);
   const app = await kv.get(K.app(ctx.from.id));
   if (app) {
-    return ctx.reply(tx(lang, "already"), { reply_markup: new InlineKeyboard().text(tx(lang, "btnUpdate"), "c:go") });
+    return ctx.reply(tx(lang, "already"), {
+      reply_markup: new InlineKeyboard().text(tx(lang, "btnAgain"), "c:again").row().text(tx(lang, "btnUpdate"), "c:go"),
+    });
   }
   return sendGreet(ctx.api, ctx.chat.id, ctx.from, lang);
 });
@@ -325,6 +351,7 @@ const HELP = [
   "",
   "/joinlink — 채널 환영 링크 (이 링크로 들어오면 봇이 인사 + 정보 받기)",
   "/pinpost — 채널에 [정보 남기기] 버튼 글 올리고 고정 (이미 있는 학생용)",
+  "/find — 학생 찾기 (오늘·내일 일할 사람 등) → 그 학생들에게 공고 보내기",
   "/export — 지원자 전체 엑셀(CSV)",
   "/start test — 학생 화면 직접 해보기 (기록은 🧪 테스트로 표시, 엑셀에서 빠짐)",
   "/reset — 내 테스트 기록 지우기",
@@ -437,6 +464,18 @@ bot.callbackQuery("c:go", async (ctx) => {
   return startFlow(ctx, langOf(ctx.from.language_code));
 });
 
+// 예전에 낸 학생: "또 일 찾아요" — 정보는 그대로, 상태만 🆕 신규로
+bot.callbackQuery("c:again", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  const app = await kv.get(K.app(ctx.from.id));
+  if (!app) return startFlow(ctx, langOf(ctx.from.language_code));
+  const before = STATUS[app.status] ?? STATUS.new;
+  const updated = { ...app, status: "new", statusBy: null, statusAt: null, updatedAt: Date.now(), againAt: Date.now() };
+  await ctx.reply(tx(app.lang, "again"));
+  return saveAndCard(ctx.api, updated, `🔁 다시 일 찾는 중 (이전: ${before})`);
+});
+
 // 이어서 하기 (알림 버튼)
 bot.callbackQuery("c:resume", async (ctx) => {
   await ctx.answerCallbackQuery();
@@ -506,6 +545,189 @@ bot.callbackQuery(/^a:days:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "✅ 학생에게 요일 질문을 보냈어요", show_alert: true });
   } catch (e) {
     await ctx.answerCallbackQuery({ text: `보내지 못했어요 (학생이 봇을 차단했을 수 있어요)`, show_alert: true });
+  }
+});
+
+// ═════════════ 🔎 학생 찾기 · 📢 공고 보내기 ═════════════
+//  /find → 일할 날(오늘·내일·토·일·상관없음) · TOPIK · 차 고르기 → [찾기]
+//  "일할 수 있는 날" = 그날 수업이 없는 학생 (일요일은 모두)
+//  결과 → [📢 이 학생들에게 공고 보내기] → 공고 글 한 번 → 미리보기 → 보내기
+//  학생은 [🙋 관심 있어요] 만 누르면 → 관리자에게 바로 알림 (전화번호 포함)
+const WD = ["월", "화", "수", "목", "금", "토", "일"];
+const kstDay = (plus = 0) => (new Date(Date.now() + 9 * 3600e3 + plus * DAY).getUTCDay() + 6) % 7; // 월=0 … 일=6
+const FIND_TTL = 3600;
+const findKey = (a) => `find:${a}`;
+const postKey = (a) => `post:${a}`;
+const TOPIK_MIN = [["상관없음", 0], ["1급↑", 1], ["3급↑", 2], ["4급↑", 3]];
+
+const findDayLabel = (f) => (f.day == null ? "상관없음" : `${f.dayName} (${WD[f.day]})`);
+const findText = (f) =>
+  ["🔎 <b>학생 찾기</b>", "", `📅 일할 날: <b>${findDayLabel(f)}</b>`, `📝 TOPIK: <b>${TOPIK_MIN.find((t) => t[1] === f.topik)[0]}</b>`, `🚗 차: <b>${f.car ? "있어야 함" : "상관없음"}</b>`].join("\n");
+const mark = (on, label) => (on ? `✅ ${label}` : label);
+const findKeyboard = (f) => {
+  const kb = new InlineKeyboard();
+  [["오늘", 0], ["내일", 1]].forEach(([n, p]) => kb.text(mark(f.dayName === n, n), `f:d:${p}`));
+  kb.text(mark(f.dayName === "토", "토"), "f:d:sat").text(mark(f.dayName === "일", "일"), "f:d:sun").text(mark(f.day == null, "상관없음"), "f:d:any").row();
+  TOPIK_MIN.forEach(([n, v]) => kb.text(mark(f.topik === v, n), `f:t:${v}`));
+  kb.row().text(mark(!f.car, "차 상관없음"), "f:c:0").text(mark(f.car, "차 있어야 함"), "f:c:1");
+  return kb.row().text("🔎 찾기", "f:go");
+};
+
+admin.command("find", async (ctx) => {
+  const f = { day: kstDay(0), dayName: "오늘", topik: 0, car: false };
+  await kv.set(findKey(ctx.from.id), f, FIND_TTL);
+  return ctx.reply(findText(f), { ...html, reply_markup: findKeyboard(f) });
+});
+
+bot.callbackQuery(/^f:(d|t|c):(\w+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  const f = (await kv.get(findKey(ctx.from.id))) ?? { day: kstDay(0), dayName: "오늘", topik: 0, car: false };
+  const [, k, v] = ctx.match;
+  if (k === "d") {
+    if (v === "any") Object.assign(f, { day: null, dayName: null });
+    else if (v === "sat") Object.assign(f, { day: 5, dayName: "토" });
+    else if (v === "sun") Object.assign(f, { day: 6, dayName: "일" });
+    else Object.assign(f, { day: kstDay(Number(v)), dayName: v === "0" ? "오늘" : "내일" });
+  }
+  if (k === "t") f.topik = Number(v);
+  if (k === "c") f.car = v === "1";
+  await kv.set(findKey(ctx.from.id), f, FIND_TTL);
+  await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
+});
+
+const freeOn = (a, day) => day == null || day === 6 || !(a.days ?? []).includes(day);
+export async function findStudents(f) {
+  const ids = (await kv.smembers(K.apps)) ?? [];
+  return (await kv.mget(ids.map(K.app)))
+    .filter((a) => a && !a.test && !isAdmin(a.id) && a.status !== "closed")
+    .filter((a) => freeOn(a, f.day) && (a.topik ?? 0) >= f.topik && (!f.car || a.car === 0))
+    .sort((a, b) => (b.topik ?? 0) - (a.topik ?? 0) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+}
+
+const LIST_MAX = 30;
+const studentLine = (a, i) =>
+  `${i + 1}. <a href="tg://user?id=${a.id}">${esc(a.name)}</a> · ${esc(a.age)} · ${a.phone ? `<code>${esc(a.phone)}</code>` : "번호 없음"} · ${esc(a.school)} · TOPIK ${KO.topik[a.topik] ?? "-"}${a.car === 0 ? " · 🚗" : ""}${a.status === "introduced" ? " · 🟢" : ""}`;
+
+bot.callbackQuery("f:go", async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  const f = (await kv.get(findKey(ctx.from.id))) ?? { day: kstDay(0), dayName: "오늘", topik: 0, car: false };
+  const list = await findStudents(f);
+  await kv.set(findKey(ctx.from.id), { ...f, ids: list.map((a) => a.id) }, FIND_TTL);
+  const head = `🔎 <b>조건에 맞는 학생 ${list.length}명</b>\n📅 ${findDayLabel(f)} · TOPIK ${TOPIK_MIN.find((t) => t[1] === f.topik)[0]} · 차 ${f.car ? "있어야 함" : "상관없음"}`;
+  if (!list.length) return ctx.reply(`${head}\n\n조건을 바꿔서 다시 /find 해보세요.`, html);
+  const lines = list.slice(0, LIST_MAX).map(studentLine);
+  if (list.length > LIST_MAX) lines.push(`… 외 ${list.length - LIST_MAX}명 (공고는 ${list.length}명 모두에게 가요)`);
+  return ctx.reply([head, "", ...lines, "", "🚗 = 차 있음 · 🟢 = 이미 일 소개받은 학생", "이름을 누르면 그 학생과 대화로 가요."].join("\n"), {
+    ...html,
+    link_preview_options: { is_disabled: true },
+    reply_markup: new InlineKeyboard().text(`📢 이 ${list.length}명에게 공고 보내기`, "p:new"),
+  });
+});
+
+// 공고 쓰기
+bot.callbackQuery("p:new", async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  const f = await kv.get(findKey(ctx.from.id));
+  if (!f?.ids?.length) return ctx.reply("찾은 학생 목록이 사라졌어요. /find 부터 다시 해주세요.");
+  await kv.set(postKey(ctx.from.id), { ids: f.ids, step: "text" }, 1800);
+  return ctx.reply(
+    [
+      `📢 <b>공고 쓰기</b> — ${f.ids.length}명에게 보내요`,
+      "",
+      "공고 내용을 <b>메시지 한 개</b>로 보내주세요. (사진 + 설명도 가능)",
+      "예) <code>11/3(월) 18~22시 · 파주 운정 식당 서빙 · 시급 12,000원</code>",
+      "한국어로 써도 되고, 봇이 앞뒤에 우즈벡어 안내와 [🙋 관심 있어요] 버튼을 붙여요.",
+      "",
+      "그만두려면 /cancel",
+    ].join("\n"),
+    html
+  );
+});
+
+admin.command("cancel", async (ctx) => {
+  await kv.del(postKey(ctx.from.id));
+  return ctx.reply("취소했어요.");
+});
+
+// 학생에게 보내는 공고 모양
+const jobMarkup = (lang, jobId) =>
+  new InlineKeyboard().text(tx(lang, "btnJobYes"), `j:y:${jobId}`).text(tx(lang, "btnJobNo"), `j:n:${jobId}`);
+async function sendJob(api, chatId, lang, job) {
+  // 한 학생에게 메시지 1개 (빨리 보내려고): 안내 + 공고 + 버튼
+  const body = (t) => [tx(lang, "jobHead"), "", esc(t), "", tx(lang, "jobFoot")].join("\n").replace(/\n{3,}/g, "\n\n");
+  const opts = { parse_mode: "HTML", reply_markup: jobMarkup(lang, job.id), link_preview_options: { is_disabled: true } };
+  if (job.text != null) return api.sendMessage(chatId, body(job.text), opts);
+  return api.copyMessage(chatId, job.from, job.msgId, { ...opts, caption: body(job.caption ?? "").slice(0, 1024) });
+}
+
+// 관리자가 공고 글을 보냄 → 미리보기
+admin.on("message", async (ctx, next) => {
+  const p = await kv.get(postKey(ctx.from.id));
+  if (!p || p.step !== "text" || ctx.message.text?.startsWith("/")) return next();
+  const jobId = await kv.incr("jobseq");
+  const m = ctx.message;
+  if (m.text == null && !(m.photo || m.video || m.document || m.animation)) return ctx.reply("글이나 사진(+설명)으로 보내주세요. 그만두려면 /cancel");
+  const job = { id: jobId, from: ctx.chat.id, msgId: m.message_id, text: m.text ?? null, caption: m.caption ?? "", ids: p.ids, by: fullName(ctx.from), at: Date.now() };
+  await kv.set(`job:${jobId}`, job, 30 * 24 * 3600);
+  await kv.set(postKey(ctx.from.id), { ...p, step: "confirm", jobId }, 1800);
+  await ctx.reply("👀 <b>학생에게는 이렇게 보여요</b> (우즈벡어 안내 + 버튼이 붙어요)", html);
+  await sendJob(ctx.api, ctx.chat.id, "uz", job);
+  return ctx.reply(`📢 공고 #${jobId}를 ${p.ids.length}명에게 보낼까요?`, {
+    reply_markup: new InlineKeyboard().text(`✅ ${p.ids.length}명에게 보내기`, `p:send:${jobId}`).text("❌ 취소", "p:cancel"),
+  });
+});
+
+bot.callbackQuery("p:cancel", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await kv.del(postKey(ctx.from.id));
+  await ctx.editMessageText("취소했어요.").catch(() => {});
+});
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SEND_MAX = 150; // 한 번에 보내는 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
+
+bot.callbackQuery(/^p:send:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const job = await kv.get(`job:${ctx.match[1]}`);
+  const p = await kv.get(postKey(ctx.from.id));
+  if (!job || p?.jobId !== job.id) return ctx.answerCallbackQuery({ text: "이미 보냈거나 취소된 공고예요.", show_alert: true });
+  await kv.del(postKey(ctx.from.id)); // 두 번 눌러도 한 번만
+  await ctx.answerCallbackQuery({ text: "보내는 중…" });
+  await ctx.editMessageText(`📤 공고 #${job.id} 보내는 중…`).catch(() => {});
+  const apps = (await kv.mget(job.ids.slice(0, SEND_MAX).map(K.app))).filter(Boolean);
+  let ok = 0;
+  let fail = 0;
+  for (const a of apps) {
+    try {
+      await sendJob(ctx.api, a.id, a.lang ?? "uz", job);
+      ok++;
+    } catch {
+      fail++; // 봇을 차단한 학생 등
+    }
+    await sleep(40);
+  }
+  const more = job.ids.length > SEND_MAX ? `\n⚠️ ${job.ids.length - SEND_MAX}명은 한 번에 보낼 수 있는 수(150명)를 넘어서 빠졌어요. 조건을 좁혀서 다시 보내주세요.` : "";
+  await ctx.editMessageText(`✅ 공고 #${job.id}를 ${ok}명에게 보냈어요.${fail ? ` (못 받은 학생 ${fail}명 — 봇을 차단했을 수 있어요)` : ""}${more}\n🙋 관심 누른 학생은 바로 알려드릴게요.`).catch(() => {});
+});
+
+// 학생: 공고에 관심 / 관심 없음
+bot.callbackQuery(/^j:(y|n):(\d+)$/, async (ctx) => {
+  const [, yn, jobId] = ctx.match;
+  const app = await kv.get(K.app(ctx.from.id));
+  const lang = app?.lang ?? langOf(ctx.from.language_code);
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  if (yn === "n") return ctx.reply(tx(lang, "jobNo"));
+  if (!(await kv.setNX(`jobyes:${jobId}:${ctx.from.id}`, 1, 30 * 24 * 3600))) return; // 두 번 눌러도 한 번
+  await ctx.reply(tx(lang, "jobYes"));
+  const who = app
+    ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"} · 차 ${KO.car[app.car] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
+    : [`👤 <a href="tg://user?id=${ctx.from.id}">${esc(fullName(ctx.from))}</a>`];
+  for (const a of adminIds()) {
+    await ctx.api.sendMessage(a, [`🙋 <b>공고 #${jobId}에 관심 있어요</b>`, ...who].join("\n"), { ...html, link_preview_options: { is_disabled: true } }).catch(() => {});
   }
 });
 
