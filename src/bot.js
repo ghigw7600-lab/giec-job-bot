@@ -332,7 +332,9 @@ bot.on("message", async (ctx, next) => {
     await ctx.deleteMessage().catch(() => {});
     // 안전망: 봇 환영 링크가 아닌 다른 링크로 들어온 학생(봇이 1:1 인사를 못 보낸 학생)
     //  → 그룹에 조용히(알림 없이) 이름을 불러 [정보 남기기] 버튼 → 10분 뒤 자동으로 지움
-    for (const u of m.new_chat_members ?? []) {
+    // (2026-11-02 대표 결정: 끔 — 고정글로 충분. 다시 켜려면 GROUP_HELLO=1 환경변수)
+    const helloOn = process.env.GROUP_HELLO === "1";
+    for (const u of helloOn ? m.new_chat_members ?? [] : []) {
       if (u.is_bot || isAdmin(u.id)) continue;
       if ((await kv.get(K.app(u.id))) || (await kv.get(K.state(u.id)))) continue; // 이미 정보를 냈거나 인사를 받은 학생
       const lang = langOf(u.language_code);
