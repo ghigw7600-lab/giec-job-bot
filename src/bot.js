@@ -293,8 +293,8 @@ async function notifyAdmins(api, app, title) {
 bot.on("chat_join_request", async (ctx) => {
   const req = ctx.chatJoinRequest;
   const ch = await kv.get(K.channel);
-  if (ch && Number(ch.id) !== req.chat.id) return; // 다른 방이면 무시
-  if (!ch) await kv.set(K.channel, { id: req.chat.id, title: req.chat.title });
+  // 그룹 → 채널로 옮기는 동안 예전 방 가입 요청도 승인 (봇이 관리자인 방이면 모두 GIEC JOB 방)
+  if (!ch) await kv.set(K.channel, { id: req.chat.id, title: req.chat.title, type: req.chat.type });
   const lang = await getLang(req.from);
   const chatId = req.user_chat_id ?? req.from.id;
   const app = await kv.get(K.app(req.from.id));
@@ -308,9 +308,16 @@ async function rememberRoom(api, chat) {
   const ch = await kv.get(K.channel);
   if (ch && Number(ch.id) === chat.id) return;
   await kv.set(K.channel, { id: chat.id, title: chat.title, type: chat.type });
+  // 방이 바뀜 (예: 그룹 → 새 채널) → 환영 링크·고정글은 새 방 기준으로 다시 만들게 비움
+  await kv.del(K.joinlink);
+  await kv.del("pinmsg");
   for (const admin of adminIds()) {
     await api
-      .sendMessage(admin, `✅ 「${esc(chat.title)}」에 봇이 관리자로 연결됐어요.\n이제 /joinlink 로 환영 링크를 받으세요.`, html)
+      .sendMessage(
+        admin,
+        `✅ 「${esc(chat.title)}」(${chat.type === "channel" ? "채널" : "그룹"})에 봇이 관리자로 연결됐어요.\n앞으로 공고·고정글·환영 링크는 이 방 기준이에요.\n👉 /joinlink 로 새 환영 링크를 받고, /pinpost 로 고정글을 올려주세요.`,
+        html
+      )
       .catch(() => {});
   }
 }
