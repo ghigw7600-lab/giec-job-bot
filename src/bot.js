@@ -395,12 +395,11 @@ admin.command("joinlink", async (ctx) => {
   const ch = await kv.get(K.channel);
   if (!ch) return ctx.reply("⚠️ 아직 방을 몰라요. GIEC JOB 그룹(채널)에 @GIEC_JOB_bot 을 관리자로 추가한 뒤, 그 방에 아무 글이나 한 줄 써 주세요 (예: 안녕). 봇이 그 방을 기억해요.");
   const fresh = String(ctx.match ?? "").trim() === "new";
-  let link = fresh ? null : await kv.get(K.joinlink);
-  if (!link) {
+  if (fresh) await kv.del(K.joinlink);
+  let link;
+  {
     try {
-      const r = await ctx.api.createChatInviteLink(ch.id, { name: "GIEC JOB 봇 환영 링크", creates_join_request: true });
-      link = r.invite_link;
-      await kv.set(K.joinlink, link);
+      link = await getJoinLink(ctx.api, ch);
     } catch (e) {
       return ctx.reply(`⚠️ 링크를 못 만들었어요: ${e.description ?? e.message}\n채널 관리자 설정에서 봇의 "사용자 초대" 권한을 켜 주세요.`);
     }
@@ -419,19 +418,64 @@ admin.command("joinlink", async (ctx) => {
   );
 });
 
+// 환영 링크 (가입 요청 링크) — 없으면 만듦
+async function getJoinLink(api, ch) {
+  let link = await kv.get(K.joinlink);
+  if (!link) {
+    const r = await api.createChatInviteLink(ch.id, { name: "GIEC JOB 봇 환영 링크", creates_join_request: true });
+    link = r.invite_link;
+    await kv.set(K.joinlink, link);
+  }
+  return link;
+}
+
+// /pinpost : 그룹 고정글 (봇 신청 버튼 + 친구 초대 링크·공유 버튼) + 그룹 소개글에도 봇·링크
+//  다시 보내면 예전 봇 고정글은 고정 해제하고 새로 고정
 admin.command("pinpost", async (ctx) => {
   const ch = await kv.get(K.channel);
   if (!ch) return ctx.reply("⚠️ 아직 방을 몰라요. 먼저 /joinlink 안내대로 방을 연결해 주세요.");
+  let link;
   try {
-    const msg = await ctx.api.sendMessage(ch.id, tx("uz", "pinPost"), {
-      ...html,
-      reply_markup: new InlineKeyboard().url(tx("uz", "btnPin"), `https://t.me/${ctx.me.username}?start=apply`),
-    });
-    await ctx.api.pinChatMessage(ch.id, msg.message_id, { disable_notification: true }).catch(() => {});
-    return ctx.reply("✅ 채널에 올리고 고정했어요.");
+    link = await getJoinLink(ctx.api, ch);
   } catch (e) {
-    return ctx.reply(`⚠️ 채널에 못 올렸어요: ${e.description ?? e.message}\n봇의 "메시지 게시·고정" 권한을 확인해 주세요.`);
+    return ctx.reply(`⚠️ 초대 링크를 못 만들었어요: ${e.description ?? e.message}\n봇의 "링크를 통해 사용자 초대" 권한을 확인해 주세요.`);
   }
+  const botName = ctx.me.username;
+  const text = [
+    "💼 <b>GIEC JOB</b>",
+    "",
+    "🇰🇷 일자리를 받으려면 봇에 정보를 남겨주세요 (1분)",
+    "🇺🇿 Ish takliflarini olish uchun botga ma'lumot qoldiring (1 daqiqa)",
+    "🇰🇬 Жумуш сунуштарын алуу үчүн ботко маалымат калтырыңыз (1 мүнөт)",
+    "",
+    `🤖 @${botName}`,
+    "",
+    "👥 친구 초대 · Do'stlarni taklif qilish · Досторду чакыруу",
+    link,
+  ].join("\n");
+  const share = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("💼 GIEC JOB — Koreyada talabalar uchun ish")}`;
+  const kb = new InlineKeyboard()
+    .url("📝 정보 남기기 · Ma'lumot qoldirish", `https://t.me/${botName}?start=apply`)
+    .row()
+    .url("📤 친구에게 보내기 · Do'stlarga yuborish", share);
+  try {
+    const old = await kv.get("pinmsg");
+    if (old) await ctx.api.unpinChatMessage(ch.id, old).catch(() => {});
+    const msg = await ctx.api.sendMessage(ch.id, text, { ...html, reply_markup: kb, link_preview_options: { is_disabled: true } });
+    await ctx.api.pinChatMessage(ch.id, msg.message_id, { disable_notification: true }).catch(() => {});
+    await kv.set("pinmsg", msg.message_id);
+  } catch (e) {
+    return ctx.reply(`⚠️ 그룹에 못 올렸어요: ${e.description ?? e.message}\n봇의 "메시지 고정" 권한을 확인해 주세요.`);
+  }
+  // 그룹 소개글(그룹 이름 눌렀을 때 보이는 글)에도 봇·초대 링크
+  const desc = `💼 일자리 신청 · Ish uchun ariza: @${botName}\n👥 친구 초대 · Taklif havolasi: ${link}`;
+  // 원래 소개글은 지우지 않고 아래에 붙임 (이미 붙어 있으면 링크만 새로)
+  const cur = ((await ctx.api.getChat(ch.id).catch(() => ({})))?.description ?? "").split("\n💼 일자리 신청")[0].trim();
+  const full = (cur ? `${cur}\n${desc}` : desc).slice(0, 255);
+  const descOk = await ctx.api.setChatDescription(ch.id, full).then(() => true).catch((e) => /not modified/i.test(e.description ?? ""));
+  return ctx.reply(
+    `✅ 그룹에 고정글을 올렸어요 (봇 신청 버튼 + 친구 초대 링크·공유 버튼).${descOk ? "\n✅ 그룹 소개글에도 봇과 초대 링크를 넣었어요." : "\n⚠️ 그룹 소개글은 못 바꿨어요 (봇의 '그룹 정보 수정' 권한 확인)."}`
+  );
 });
 
 admin.command("reset", async (ctx) => {
