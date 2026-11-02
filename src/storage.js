@@ -38,6 +38,7 @@ function redisBackend(url) {
       if (ttl) await c.expire(k, ttl);
     },
     lrange: async (k) => (await client()).lRange(k, 0, -1),
+    decr: async (k) => (await client()).decr(k),
     incr: async (k, ttl) => {
       const c = await client();
       const n = await c.incr(k);
@@ -72,6 +73,7 @@ function upstashBackend(url, token) {
       if (ttl) await call(["EXPIRE", k, String(ttl)]);
     },
     lrange: (k) => call(["LRANGE", k, "0", "-1"]),
+    decr: (k) => call(["DECR", k]),
     incr: async (k, ttl) => {
       const n = await call(["INCR", k]);
       if (ttl && n === 1) await call(["EXPIRE", k, String(ttl)]);
@@ -111,6 +113,12 @@ function memoryBackend() {
       map.set(k, e);
     },
     lrange: async (k) => [...(alive(k)?.v ?? [])],
+    decr: async (k) => {
+      const e = alive(k) ?? { v: "0", exp: 0 };
+      e.v = String(Number(e.v) - 1);
+      map.set(k, e);
+      return Number(e.v);
+    },
     incr: async (k, ttl) => {
       const e = alive(k) ?? { v: "0", exp: ttl ? Date.now() + ttl * 1000 : 0 };
       e.v = String(Number(e.v) + 1);
@@ -154,6 +162,7 @@ export const kv = {
   },
   // 숫자 1 올리기 (미니앱 방문 수 등)
   incr: (key, ttlSec) => getBackend().incr(PREFIX + key, ttlSec),
+  decr: (key) => getBackend().decr(PREFIX + key),
   // 집합 (학생 id 목록 등)
   sadd: (key, member) => getBackend().sadd(PREFIX + key, String(member)),
   srem: (key, member) => getBackend().srem(PREFIX + key, String(member)),

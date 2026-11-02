@@ -863,6 +863,9 @@ admin.on("message", async (ctx, next) => {
     by: fullName(ctx.from),
     at: Date.now(),
   };
+  // 모집 인원: 공고 글에서 "4명"을 찾아 읽음 → 지원할 때마다 그룹방에 "N명 남았습니다", 다 차면 자동 마감
+  const slotMatch = /(\d{1,3})\s*명/.exec(job.text ?? job.caption ?? "");
+  job.slots = slotMatch ? Number(slotMatch[1]) : null;
   await kv.set(`job:${jobId}`, job, 60 * 24 * 3600);
   await kv.set(postKey(ctx.from.id), { step: "confirm", jobId, where: p.where ?? "g" }, 1800);
   const where = p.where ?? "g";
@@ -875,6 +878,12 @@ admin.on("message", async (ctx, next) => {
     await ctx.reply("👀 <b>1:1로는 이렇게 가요</b>", html);
     await sendTo(ctx.api, ctx.chat.id, job, dmBody(job, "uz"), dmMarkup("uz", jobId));
   }
+  await ctx.reply(
+    job.slots
+      ? `👥 모집 인원 <b>${job.slots}명</b> (글에서 읽었어요) — 지원이 들어올 때마다 봇이 그룹방에 "N명 남았습니다"를 달고, ${job.slots}명이 차면 자동으로 마감해요.`
+      : `ℹ️ 글에 "4명"처럼 인원 숫자가 없어서 남은 인원은 세지 않아요. 세려면 /cancel 후 인원을 넣어 다시 보내주세요.`,
+    html
+  );
   const target = where === "g" ? "그룹방에 올릴까요?" : where === "d" ? `${n}명에게 1:1로 보낼까요?` : `그룹방에 올리고 ${n}명에게 1:1로도 보낼까요?`;
   return ctx.reply(`📢 공고 #${jobId} — ${target}`, {
     reply_markup: new InlineKeyboard().text("✅ 보내기", `p:send:${jobId}:${where}`).text("❌ 취소", "p:cancel"),
@@ -933,19 +942,44 @@ bot.callbackQuery(/^p:send:(\d+):(g|d|b)$/, async (ctx) => {
 });
 
 // 마감: 그룹방 공고에 표시 + 버튼 없앰, 1:1 버튼도 더는 안 받음
+// 마감: 그룹방 공고에 표시 + 버튼 없앰, 그 뒤 지원은 "마감" 안내
+async function closeJob(api, job) {
+  job.closed = true;
+  await kv.set(`job:${job.id}`, job, 60 * 24 * 3600);
+  if (!job.group) return;
+  const text = groupBody(job, true);
+  const edit = job.text != null
+    ? api.editMessageText(job.group.chat, job.group.msgId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } })
+    : api.editMessageCaption(job.group.chat, job.group.msgId, { caption: text.slice(0, 1024), parse_mode: "HTML", reply_markup: { inline_keyboard: [] } });
+  await edit.catch(() => {});
+}
+// 다시 열기 (마감 뒤 지원 취소로 자리가 생겼을 때)
+async function reopenJob(api, job, username) {
+  job.closed = false;
+  await kv.set(`job:${job.id}`, job, 60 * 24 * 3600);
+  if (!job.group) return;
+  const opts = { parse_mode: "HTML", reply_markup: groupMarkup(username, job.id) };
+  const edit = job.text != null
+    ? api.editMessageText(job.group.chat, job.group.msgId, groupBody(job), opts)
+    : api.editMessageCaption(job.group.chat, job.group.msgId, { ...opts, caption: groupBody(job).slice(0, 1024) });
+  await edit.catch(() => {});
+}
+// 그룹방 공고에 답글로 남은 인원 알림
+async function postRemaining(api, job, left) {
+  if (!job.group) return;
+  const text = left > 0
+    ? `🔔 <b>${left}명 남았습니다</b> · ${left} kishi qoldi · Осталось ${left}`
+    : "🔒 <b>마감됐습니다</b> · Yopildi · Набор закрыт";
+  await api
+    .sendMessage(job.group.chat, text, { parse_mode: "HTML", disable_notification: true, reply_parameters: { message_id: job.group.msgId, allow_sending_without_reply: true } })
+    .catch(() => {});
+}
+
 bot.callbackQuery(/^p:close:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   const job = await kv.get(`job:${ctx.match[1]}`);
   if (!job) return ctx.answerCallbackQuery({ text: "공고를 찾을 수 없어요.", show_alert: true });
-  job.closed = true;
-  await kv.set(`job:${job.id}`, job, 60 * 24 * 3600);
-  if (job.group) {
-    const text = groupBody(job, true);
-    const edit = job.text != null
-      ? ctx.api.editMessageText(job.group.chat, job.group.msgId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } })
-      : ctx.api.editMessageCaption(job.group.chat, job.group.msgId, { caption: text.slice(0, 1024), parse_mode: "HTML", reply_markup: { inline_keyboard: [] } });
-    await edit.catch(() => {});
-  }
+  await closeJob(ctx.api, job);
   await ctx.answerCallbackQuery({ text: "🔒 마감했어요" });
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
   await ctx.reply(`🔒 공고 #${job.id} 마감했어요.${job.group ? " 그룹방 공고에도 '마감'이 표시됐어요." : ""}`);
@@ -958,17 +992,58 @@ async function applyJob(api, from, jobId) {
   const lang = app?.lang ?? (await getLang(from));
   if (!job || job.closed) return { lang, msg: tx(lang, "jobClosed") };
   if (!(await kv.setNX(`jobyes:${jobId}:${from.id}`, 1, 60 * 24 * 3600))) return { lang, msg: tx(lang, "jobYes") };
+  // 인원 세기 (선착순)
+  let left = null;
+  if (job.slots) {
+    const taken = await kv.incr(`jobcnt:${jobId}`, 60 * 24 * 3600);
+    if (taken > job.slots) {
+      // 동시에 눌러서 넘친 경우 → 되돌리고 마감 안내
+      await kv.decr(`jobcnt:${jobId}`).catch(() => {});
+      await kv.del(`jobyes:${jobId}:${from.id}`);
+      return { lang, msg: tx(lang, "jobClosed") };
+    }
+    left = job.slots - taken;
+    await postRemaining(api, job, left);
+    if (left === 0) await closeJob(api, job);
+  }
   const who = app
     ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"} · 차 ${KO.car[app.car] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
     : [`👤 <a href="tg://user?id=${from.id}">${esc(fullName(from))}</a>`];
   const first = (job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40);
   for (const a of adminIds()) {
     await api
-      .sendMessage(a, [`🙋 <b>공고 #${jobId} 지원</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}`, `└ ${esc(first)}`, ...who].join("\n"), { ...html, link_preview_options: { is_disabled: true } })
+      .sendMessage(
+        a,
+        [
+          `🙋 <b>공고 #${jobId} 지원</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}${left != null ? ` · ${left > 0 ? `남은 인원 ${left}명` : "🔒 다 차서 자동 마감"}` : ""}`,
+          `└ ${esc(first)}`,
+          ...who,
+        ].join("\n"),
+        {
+          ...html,
+          link_preview_options: { is_disabled: true },
+          reply_markup: job.slots ? new InlineKeyboard().text("↩️ 이 지원 취소 (자리 다시 열기)", `a:unapply:${jobId}:${from.id}`) : undefined,
+        }
+      )
       .catch(() => {});
   }
   return { lang, msg: tx(lang, "jobYes") };
 }
+
+// 관리자: 지원 취소 (안 온다고 하거나 잘못 지원) → 자리 하나 다시 열고 그룹방에 남은 인원 알림
+bot.callbackQuery(/^a:unapply:(\d+):(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const [, jobId, uid] = ctx.match;
+  const job = await kv.get(`job:${jobId}`);
+  if (!job || !(await kv.get(`jobyes:${jobId}:${uid}`))) return ctx.answerCallbackQuery({ text: "이미 취소됐거나 없는 지원이에요.", show_alert: true });
+  await kv.del(`jobyes:${jobId}:${uid}`);
+  const taken = await kv.decr(`jobcnt:${jobId}`);
+  const left = Math.max(0, job.slots - Math.max(0, taken));
+  if (job.closed && left > 0) await reopenJob(ctx.api, job, ctx.me.username);
+  await postRemaining(ctx.api, job, left);
+  await ctx.answerCallbackQuery({ text: `↩️ 취소했어요 — 남은 인원 ${left}명` });
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+});
 
 // 학생: 1:1 공고에 관심 / 관심 없음
 bot.callbackQuery(/^j:(y|n):(\d+)$/, async (ctx) => {
