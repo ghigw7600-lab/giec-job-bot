@@ -102,8 +102,24 @@ export const TEXT = {
   },
 };
 
-export const langOf = (code) => (/^(ru|ky|kk|be|uk)/.test(code ?? "") ? "ru" : "uz");
+import { MORE, LANGS } from "./text-more.js";
+Object.assign(TEXT, MORE);
+export { LANGS };
+
+// 텔레그램 앱 언어 → 봇 언어 (학생이 [🌐] 버튼으로 바꾸면 그게 우선 — bot.js getLang)
+export function langOf(code) {
+  const c = String(code ?? "").toLowerCase();
+  if (!c || c.startsWith("uz")) return "uz";
+  if (c.startsWith("ky")) return "ky";
+  if (/^(ru|kk|be|uk|tg)/.test(c)) return "ru";
+  if (c.startsWith("mn")) return "mn";
+  if (c.startsWith("vi")) return "vi";
+  if (c.startsWith("th")) return "th";
+  return "en"; // 그 외 언어 (영어 등)
+}
+export const langName = (code) => LANGS.find((l) => l[0] === code)?.[2] ?? "우즈벡어";
 export const tx = (lang, key) => TEXT[lang]?.[key] || TEXT.uz[key];
+export const LANG_BTN = "🌐 Til · Язык · Language";
 
 // 관리자 카드에 쓰는 한국어 값 (학생이 고른 버튼 번호 → 한국어)
 export const KO = {

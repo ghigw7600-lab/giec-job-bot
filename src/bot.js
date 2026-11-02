@@ -15,7 +15,7 @@
 // ═════════════════════════════════════════════════════════════
 import { Bot, InlineKeyboard, Keyboard, InputFile } from "grammy";
 import { kv } from "./storage.js";
-import { tx, langOf, KO } from "./text.js";
+import { tx, langOf, KO, LANGS, LANG_BTN, langName } from "./text.js";
 
 export const bot = new Bot(process.env.BOT_TOKEN || "0:test");
 
@@ -76,6 +76,8 @@ const nowKST = (ts = Date.now()) =>
   new Date(ts).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 const fullName = (u) => [u?.first_name, u?.last_name].filter(Boolean).join(" ") || "?";
 const html = { parse_mode: "HTML" };
+// 학생 언어: 직접 고른 언어가 있으면 그것, 없으면 텔레그램 앱 언어
+const getLang = async (from) => (await kv.get(`lang:${from?.id}`)) ?? langOf(from?.language_code);
 
 // ═════════════ 학생 쪽 ═════════════
 
@@ -84,7 +86,7 @@ async function sendGreet(api, chatId, from, lang) {
   await setState(from.id, { step: "greet", lang, mode: "full", data: {}, chat: chatId, nudged: 0 });
   await api.sendMessage(chatId, tx(lang, "greet").replace("{name}", esc(from.first_name ?? "")), {
     ...html,
-    reply_markup: new InlineKeyboard().text(tx(lang, "btnStart"), "c:go"),
+    reply_markup: new InlineKeyboard().text(tx(lang, "btnStart"), "c:go").row().text(LANG_BTN, "c:lang"),
   });
 }
 
@@ -262,7 +264,7 @@ export function cardText(app, title) {
     `🚗 자동차: ${KO.car[app.car] ?? "-"}`,
     `📅 수업 요일: ${dayText(app.days)}`,
     `💬 텔레그램: ${tg}`,
-    `🌐 언어: ${app.lang === "ru" ? "러시아어" : "우즈벡어"}`,
+    `🌐 언어: ${langName(app.lang)}`,
     line,
     `상태: ${st}${app.statusBy ? ` — ${esc(app.statusBy)} · ${nowKST(app.statusAt)}` : ""}`,
     `🕐 ${nowKST(app.updatedAt ?? app.createdAt)}`,
@@ -293,7 +295,7 @@ bot.on("chat_join_request", async (ctx) => {
   const ch = await kv.get(K.channel);
   if (ch && Number(ch.id) !== req.chat.id) return; // 다른 방이면 무시
   if (!ch) await kv.set(K.channel, { id: req.chat.id, title: req.chat.title });
-  const lang = langOf(req.from.language_code);
+  const lang = await getLang(req.from);
   const chatId = req.user_chat_id ?? req.from.id;
   const app = await kv.get(K.app(req.from.id));
   if (!app) await sendGreet(ctx.api, chatId, req.from, lang).catch((e) => console.error("인사 실패:", e.description));
@@ -329,8 +331,8 @@ bot.on("message", async (ctx, next) => {
   if (chat?.type !== "group" && chat?.type !== "supergroup") return next();
   const m = ctx.message;
   if (m.new_chat_members || m.left_chat_member) {
-    // (2026-11-02 대표·혜승 결정) 참여·퇴장 알림은 지우지 않음 — 누가 들어왔는지 보이게. 다시 켜려면 HIDE_JOINS=1
-    if (process.env.HIDE_JOINS === "1") await ctx.deleteMessage().catch(() => {});
+    // 참여·퇴장 알림은 봇이 바로 지움 (2026-11-02 대표 결정 — 다시 켬). 끄려면 Vercel 환경변수 HIDE_JOINS=0
+    if (process.env.HIDE_JOINS !== "0") await ctx.deleteMessage().catch(() => {});
     // 안전망: 봇 환영 링크가 아닌 다른 링크로 들어온 학생(봇이 1:1 인사를 못 보낸 학생)
     //  → 그룹에 조용히(알림 없이) 이름을 불러 [정보 남기기] 버튼 → 10분 뒤 자동으로 지움
     // (2026-11-02 대표 결정: 끔 — 고정글로 충분. 다시 켜려면 GROUP_HELLO=1 환경변수)
@@ -338,7 +340,7 @@ bot.on("message", async (ctx, next) => {
     for (const u of helloOn ? m.new_chat_members ?? [] : []) {
       if (u.is_bot || isAdmin(u.id)) continue;
       if ((await kv.get(K.app(u.id))) || (await kv.get(K.state(u.id)))) continue; // 이미 정보를 냈거나 인사를 받은 학생
-      const lang = langOf(u.language_code);
+      const lang = await getLang(u);
       const msg = await ctx.api
         .sendMessage(chat.id, tx(lang, "groupHello").replace("{name}", `<a href="tg://user?id=${u.id}">${esc(u.first_name ?? "")}</a>`), {
           parse_mode: "HTML",
@@ -358,7 +360,7 @@ const pm = bot.filter((ctx) => ctx.chat?.type === "private");
 
 // /start
 pm.command("start", async (ctx) => {
-  const lang = langOf(ctx.from.language_code);
+  const lang = await getLang(ctx.from);
   const payload = String(ctx.match ?? "");
   if (isAdmin(ctx.from.id) && !payload.startsWith("test") && !payload.startsWith("job_")) return ctx.reply(HELP, html);
   await clearState(ctx.from.id);
@@ -538,10 +540,31 @@ admin.command("export", async (ctx) => {
 bot.callbackQuery("c:go", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
-  return startFlow(ctx, langOf(ctx.from.language_code));
+  return startFlow(ctx, await getLang(ctx.from));
 });
 
 // 예전에 낸 학생: "또 일 찾아요" — 정보는 그대로, 상태만 🆕 신규로
+// 🌐 언어 바꾸기 (인사 메시지 아래 버튼)
+bot.callbackQuery("c:lang", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const kb = new InlineKeyboard();
+  LANGS.forEach(([code, label], i) => {
+    kb.text(label, `c:setlang:${code}`);
+    if (i % 2 === 1) kb.row();
+  });
+  await ctx.editMessageReplyMarkup({ reply_markup: kb }).catch(() => {});
+});
+bot.callbackQuery(/^c:setlang:(\w+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const lang = ctx.match[1];
+  if (!LANGS.some((l) => l[0] === lang)) return;
+  await kv.set(`lang:${ctx.from.id}`, lang);
+  const app = await kv.get(K.app(ctx.from.id));
+  if (app) await kv.set(K.app(ctx.from.id), { ...app, lang });
+  await ctx.deleteMessage().catch(() => {});
+  return sendGreet(ctx.api, ctx.chat.id, ctx.from, lang);
+});
+
 async function reactivate(ctx, app) {
   const before = STATUS[app.status] ?? STATUS.new;
   const updated = { ...app, status: "new", statusBy: null, statusAt: null, updatedAt: Date.now(), againAt: Date.now() };
@@ -552,7 +575,7 @@ bot.callbackQuery("c:again", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
   const app = await kv.get(K.app(ctx.from.id));
-  if (!app) return startFlow(ctx, langOf(ctx.from.language_code));
+  if (!app) return startFlow(ctx, await getLang(ctx.from));
   if (app.gender == null) {
     // 예전에 성별 없이 낸 학생 → 성별만 한 번 묻고 다시 신청
     const kb = new InlineKeyboard();
@@ -932,7 +955,7 @@ bot.callbackQuery(/^p:close:(\d+)$/, async (ctx) => {
 async function applyJob(api, from, jobId) {
   const job = await kv.get(`job:${jobId}`);
   const app = await kv.get(K.app(from.id));
-  const lang = app?.lang ?? langOf(from.language_code);
+  const lang = app?.lang ?? (await getLang(from));
   if (!job || job.closed) return { lang, msg: tx(lang, "jobClosed") };
   if (!(await kv.setNX(`jobyes:${jobId}:${from.id}`, 1, 60 * 24 * 3600))) return { lang, msg: tx(lang, "jobYes") };
   const who = app
@@ -954,7 +977,7 @@ bot.callbackQuery(/^j:(y|n):(\d+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
   if (yn === "n") {
     const app = await kv.get(K.app(ctx.from.id));
-    return ctx.reply(tx(app?.lang ?? langOf(ctx.from.language_code), "jobNo"));
+    return ctx.reply(tx(app?.lang ?? (await getLang(ctx.from)), "jobNo"));
   }
   const r = await applyJob(ctx.api, ctx.from, jobId);
   return ctx.reply(r.msg);
@@ -983,7 +1006,7 @@ pm.on("message", async (ctx) => {
   if (st) return ask(ctx, st);
   if (isAdmin(ctx.from.id)) return ctx.reply(HELP, html);
 
-  const lang = langOf(ctx.from.language_code);
+  const lang = await getLang(ctx.from);
   const app = await kv.get(K.app(ctx.from.id));
   if (!app) return sendGreet(ctx.api, ctx.chat.id, ctx.from, lang);
   // 이미 지원한 학생이 보낸 메시지 → 관리자에게 전달
