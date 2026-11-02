@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GIEC JOB 관리</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+    --text: var(--tg-theme-text-color, #16181d);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --link: var(--tg-theme-link-color, #2a6fdb);
+    --btn: var(--tg-theme-button-color, #2a6fdb);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --line: color-mix(in srgb, var(--hint) 25%, transparent);
+    --ok: #1f9d55; --no: #d64545; --warn: #d98a00;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; background: var(--bg2); color: var(--text); padding-bottom: 72px; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 14px 0; }
+  header h1 { margin: 0 0 8px; font-size: 17px; }
+  nav { display: flex; gap: 4px; overflow-x: auto; }
+  nav button { flex: 1; min-width: 70px; border: 0; background: none; color: var(--hint); padding: 9px 4px 10px; font-size: 14px; border-bottom: 2px solid transparent; }
+  nav button.on { color: var(--text); border-color: var(--btn); font-weight: 600; }
+  main { padding: 12px; max-width: 720px; margin: 0 auto; }
+  .card { background: var(--bg); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .sp { flex: 1; min-width: 0; }
+  .muted { color: var(--hint); font-size: 13px; }
+  .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--bg2); color: var(--hint); white-space: nowrap; }
+  .pill.urgent { background: #ffe6e6; color: #c0392b; }
+  .pill.open { background: #e5f6ec; color: var(--ok); }
+  .pill.closed { background: var(--bg2); color: var(--hint); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+  .chip { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
+  .chip.on { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+  .btn { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 14px; font-weight: 600; background: var(--btn); color: var(--btn-text); }
+  .btn.ghost { background: var(--bg2); color: var(--text); }
+  .btn.red { background: #fdeaea; color: var(--no); }
+  .btn.sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  input, textarea, select { width: 100%; font: inherit; color: var(--text); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  textarea { min-height: 130px; resize: vertical; }
+  label.f { display: block; font-size: 13px; color: var(--hint); margin: 12px 0 6px; }
+  .pre { white-space: pre-wrap; background: var(--bg2); border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+  .stat { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat .card { margin: 0; }
+  .stat b { display: block; font-size: 24px; }
+  .att { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); font-size: 16px; }
+  .att.ok.on { background: #e5f6ec; border-color: var(--ok); }
+  .att.no.on { background: #fdeaea; border-color: var(--no); }
+  a { color: var(--link); text-decoration: none; }
+  .empty { text-align: center; color: var(--hint); padding: 40px 10px; }
+  .back { border: 0; background: none; color: var(--link); font-size: 15px; padding: 0 0 10px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #222; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 20; max-width: 90%; }
+  .toast.show { opacity: .95; }
+  .skel { height: 64px; border-radius: 12px; background: linear-gradient(90deg, var(--bg) 0%, var(--bg2) 50%, var(--bg) 100%); background-size: 200% 100%; animation: sh 1.2s infinite; margin-bottom: 10px; }
+  @keyframes sh { to { background-position: -200% 0; } }
+  .hist { font-size: 13px; margin: 2px 0; }
+  .count { font-size: 14px; margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛠 GIEC JOB 관리</h1>
+  <nav id="tabs">
+    <button data-t="jobs" class="on">📋 공고</button>
+    <button data-t="students">👥 학생</button>
+    <button data-t="new">✍️ 새 공고</button>
+    <button data-t="stats">📊 현황</button>
+  </nav>
+</header>
+<main id="view"><div class="skel"></div><div class="skel"></div><div class="skel"></div></main>
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2200); };
+const haptic = () => tg?.HapticFeedback?.impactOccurred?.("light");
+
+async function api(action, args = {}) {
+  const r = await fetch("/api/mini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ area: "admin", action, initData: tg?.initData ?? "", ...args }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "오류");
+  return j;
+}
+
+const STATUS = { new: "🆕 신규", contacted: "🟡 연락함", introduced: "🟢 소개함", closed: "⚫ 종결" };
+const badge = (s) => (s.workNo >= 2 ? "⚠️" : s.workOk >= 3 && !s.workNo ? "⭐" : "");
+const ago = (ts) => { if (!ts) return ""; const m = Math.round((Date.now() - ts) / 60000); return m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+const kst = (off) => { const d = new Date(Date.now() + 9 * 3600e3 + off * 864e5); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
+
+let DATA = null;
+let tab = "jobs";
+let jobFilter = "open";
+let stuQ = "", stuF = {};
+const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: "", noFlaky: false, text: "", slots: "" };
+
+async function load() {
+  try { DATA = await api("overview"); } catch (e) { $("#view").innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; return false; }
+  return true;
+}
+
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+  render();
+}
+document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => { location.hash = ""; setTab(b.dataset.t); }));
+
+function render() {
+  const h = location.hash.slice(1);
+  if (h.startsWith("job=")) return renderJob(h.slice(4));
+  if (h.startsWith("stu=")) return renderStudent(h.slice(4));
+  ({ jobs: renderJobs, students: renderStudents, new: renderNew, stats: renderStats })[tab]();
+}
+window.addEventListener("hashchange", render);
+
+// ── 📋 공고 ──
+function renderJobs() {
+  const list = DATA.jobs.filter((j) => (jobFilter === "open" ? !j.closed : jobFilter === "closed" ? j.closed : true));
+  $("#view").innerHTML = `
+    <div class="chips">${[["open", "열린 공고"], ["closed", "마감"], ["all", "전체"]].map(([k, n]) => `<button class="chip ${jobFilter === k ? "on" : ""}" data-f="${k}">${n}</button>`).join("")}</div>
+    ${list.length ? list.map(jobCard).join("") : `<div class="empty">공고가 없어요.<br>✍️ 새 공고 탭이나 봇의 /find 로 올려보세요.</div>`}`;
+  document.querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { jobFilter = b.dataset.f; renderJobs(); }));
+  document.querySelectorAll("[data-job]").forEach((c) => (c.onclick = () => (location.hash = `job=${c.dataset.job}`)));
+}
+const jobCard = (j) => `
+  <div class="card" data-job="${j.id}">
+    <div class="row">
+      <span class="pill ${j.kind === "urgent" ? "urgent" : ""}">${j.kind === "urgent" ? "🚨 긴급" : "📢 일반"}</span>
+      ${j.dateLabel ? `<span class="pill">📅 ${esc(j.dateLabel)}</span>` : ""}
+      <span class="sp"></span>
+      <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "🔒 마감" : "모집 중"}</span>
+    </div>
+    <div class="title" style="margin-top:6px">#${j.id} ${esc(j.title)}</div>
+    <div class="muted">🙋 지원 ${j.applied}${j.slots ? ` / ${j.slots}명` : "명"}${j.attOk || j.attNo ? ` · ✅ ${j.attOk} ❌ ${j.attNo}` : ""} · ${ago(j.at)}${j.repostOf ? ` · #${j.repostOf} 다시 올림` : ""}</div>
+  </div>`;
+
+async function renderJob(id) {
+  $("#view").innerHTML = `<button class="back" onclick="history.back()">‹ 목록</button><div class="skel"></div><div class="skel"></div>`;
+  let d;
+  try { d = await api("job", { id }); } catch (e) { $("#view").innerHTML = `<button class="back" onclick="history.back()">‹ 목록</button><div class="empty">⚠️ ${esc(e.message)}</div>`; return; }
+  const j = d.job;
+  const left = j.slots ? Math.max(0, j.slots - j.applied) : null;
+  const unmarked = d.applicants.filter((a) => !a.att).length;
+  $("#view").innerHTML = `
+    <button class="back" onclick="location.hash=''">‹ 목록</button>
+    <div class="card">
+      <div class="row">
+        <span class="pill ${j.kind === "urgent" ? "urgent" : ""}">${j.kind === "urgent" ? "🚨 긴급" : "📢 일반"}</span>
+        ${j.dateLabel ? `<span class="pill">📅 ${esc(j.dateLabel)}</span>` : ""}
+        <span class="sp"></span>
+        <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "🔒 마감" : "모집 중"}</span>
+      </div>
+      <div class="pre">${esc(j.text)}</div>
+      <div class="muted">공고 #${j.id} · 🙋 지원 ${j.applied}${j.slots ? ` / ${j.slots}명 (남은 ${left}명)` : "명"} · ${j.inGroup ? "👥 그룹방(채널)" : "📩 1:1만"}</div>
+      <div class="btns">
+        ${j.closed ? `<button class="btn ghost sm" id="reopen">🔓 다시 열기</button>` : `<button class="btn red sm" id="close">🔒 마감</button>`}
+        <button class="btn sm" id="repost">📢 다시 올리기</button>
+      </div>
+    </div>
+    <div class="row" style="margin:14px 2px 8px"><b class="sp">지원자 ${d.applicants.length}명</b>${d.applicants.length && unmarked ? `<button class="btn ghost sm" id="attall">✅ 나머지 모두 출근</button>` : ""}</div>
+    ${d.applicants.length ? d.applicants.map((a) => `
+      <div class="card">
+        <div class="row">
+          <div class="sp">
+            <div class="title">${badge(a)} ${esc(a.name)} <span class="muted">${a.gender ?? ""} ${a.age ?? ""}세</span></div>
+            <div class="muted">${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}${a.car ? " · 🚗" : ""}</div>
+            <div class="muted">출근 ${a.workOk} · 빵꾸 ${a.workNo} · ${ago(a.appliedAt)} 지원</div>
+          </div>
+          <button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}" title="출근">✅</button>
+          <button class="att no ${a.att === "no" ? "on" : ""}" data-att="no" data-uid="${a.id}" title="빵꾸">❌</button>
+        </div>
+        <div class="btns">
+          <button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>
+          ${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}
+          <button class="btn red sm" data-unapply="${a.id}">↩️ 지원 취소</button>
+        </div>
+      </div>`).join("") : `<div class="empty">아직 지원자가 없어요</div>`}`;
+  const act = async (fn, msg) => { try { haptic(); await fn(); toast(msg); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); } };
+  $("#close") && ($("#close").onclick = () => tg?.showConfirm ? tg.showConfirm("마감할까요? 그룹방 공고도 '마감'으로 바뀌어요.", (ok) => ok && act(() => api("close", { id }), "🔒 마감했어요")) : act(() => api("close", { id }), "🔒 마감했어요"));
+  $("#reopen") && ($("#reopen").onclick = () => act(() => api("reopen", { id }), "🔓 다시 열었어요"));
+  $("#attall") && ($("#attall").onclick = () => act(() => api("attall", { id }), "✅ 기록했어요"));
+  $("#repost").onclick = () => {
+    // 몇 명 다시 뽑을지 입력칸 (텔레그램 안에서는 prompt 창이 안 뜨는 폰이 있어서 화면에 직접)
+    const box = $("#repost").parentElement;
+    box.innerHTML = `<div style="width:100%"><label class="f" style="margin-top:0">몇 명 다시 모집할까요? <span class="muted">(비우면 인원 안 셈)</span></label>
+      <div class="row"><input id="rs" inputmode="numeric" value="${left ?? j.slots ?? ""}" class="sp"><button class="btn sm" id="rsGo">📢 맨 아래에 다시 올리기</button></div>
+      <div class="muted" style="margin-top:6px">새 공고가 그룹방(채널) 맨 아래에 🚨 급구로 올라가고, 이 공고는 마감돼요.</div></div>`;
+    $("#rsGo").onclick = () => act(async () => { const r = await api("repost", { id, slots: $("#rs").value || null }); location.hash = `job=${r.id}`; }, "📢 맨 아래에 다시 올렸어요");
+  };
+  document.querySelectorAll("[data-att]").forEach((b) => (b.onclick = () => { const cur = b.classList.contains("on"); act(() => api("att", { id, uid: b.dataset.uid, r: cur ? null : b.dataset.att }), cur ? "지웠어요" : b.dataset.att === "ok" ? "✅ 출근" : "❌ 빵꾸"); }));
+  document.querySelectorAll("[data-unapply]").forEach((b) => (b.onclick = () => (tg?.showConfirm ? tg.showConfirm("이 지원을 취소하고 자리를 다시 열까요?", (ok) => ok && act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요")) : act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요"))));
+  document.querySelectorAll("[data-stu]").forEach((b) => (b.onclick = () => (location.hash = `stu=${b.dataset.stu}`)));
+  document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => tg?.openTelegramLink(`https://t.me/${b.dataset.chat}`)));
+}
+
+// ── 👥 학생 ──
+function renderStudents() {
+  const q = stuQ.trim().toLowerCase();
+  let list = DATA.students.filter((s) => !q || [s.name, s.school, s.phone, s.tgName, s.username].some((v) => String(v ?? "").toLowerCase().includes(q)));
+  if (stuF.m) list = list.filter((s) => s.gender === "남");
+  if (stuF.f) list = list.filter((s) => s.gender === "여");
+  if (stuF.t3) list = list.filter((s) => s.topikN >= 2);
+  if (stuF.car) list = list.filter((s) => s.car);
+  if (stuF.star) list = list.filter((s) => badge(s) === "⭐");
+  if (stuF.flaky) list = list.filter((s) => s.workNo >= 2);
+  if (stuF.newOnly) list = list.filter((s) => s.status === "new");
+  const chip = (k, n) => `<button class="chip ${stuF[k] ? "on" : ""}" data-sf="${k}">${n}</button>`;
+  $("#view").innerHTML = `
+    <input id="q" placeholder="이름 · 학교 · 전화 검색" value="${esc(stuQ)}" style="margin-bottom:10px">
+    <div class="chips">${chip("newOnly", "🆕 신규")}${chip("m", "남")}${chip("f", "여")}${chip("t3", "TOPIK 3급↑")}${chip("car", "🚗 차")}${chip("star", "⭐ 성실")}${chip("flaky", "⚠️ 빵꾸")}</div>
+    <div class="muted" style="margin:0 2px 8px">${list.length}명</div>
+    ${list.slice(0, 300).map((s) => `
+      <div class="card" data-s="${s.id}">
+        <div class="row"><span class="title sp">${badge(s)} ${esc(s.name)} <span class="muted">${s.gender ?? ""} ${s.age ?? ""}세</span></span><span class="pill">${STATUS[s.status] ?? ""}</span></div>
+        <div class="muted">${esc(s.school)} · TOPIK ${esc(s.topik)}${s.car ? " · 🚗" : ""} · 수업 ${s.days.length ? s.days.join("·") : "없음"}${s.workOk || s.workNo ? ` · 출근 ${s.workOk} 빵꾸 ${s.workNo}` : ""}</div>
+      </div>`).join("") || `<div class="empty">학생이 없어요</div>`}`;
+  const qi = $("#q");
+  qi.oninput = () => { stuQ = qi.value; const pos = qi.selectionStart; renderStudents(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); };
+  document.querySelectorAll("[data-sf]").forEach((b) => (b.onclick = () => { const k = b.dataset.sf; stuF[k] = !stuF[k]; if (k === "m" && stuF.m) stuF.f = false; if (k === "f" && stuF.f) stuF.m = false; renderStudents(); }));
+  document.querySelectorAll("[data-s]").forEach((c) => (c.onclick = () => (location.hash = `stu=${c.dataset.s}`)));
+}
+
+function renderStudent(id) {
+  const s = DATA.students.find((x) => String(x.id) === String(id));
+  if (!s) { $("#view").innerHTML = `<button class="back" onclick="history.back()">‹ 뒤로</button><div class="empty">학생을 찾을 수 없어요 (테스트 기록이거나 지워졌어요)</div>`; return; }
+  $("#view").innerHTML = `
+    <button class="back" onclick="history.back()">‹ 뒤로</button>
+    <div class="card">
+      <div class="title" style="font-size:17px">${badge(s)} ${esc(s.name)}</div>
+      <div class="muted">${s.gender ?? "성별 미입력"} · ${s.age ?? "-"}세 · ${esc(s.lang)}</div>
+      <div style="margin-top:10px">
+        <div>📞 ${s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : "한국 번호 없음"}</div>
+        <div>🏫 ${esc(s.school)}</div>
+        <div>📝 TOPIK ${esc(s.topik)} · IELTS ${esc(s.ielts)} · 🚗 ${s.car ? "있음" : "없음"}</div>
+        <div>📅 수업: ${s.days.length ? s.days.join("·") : "없음"}</div>
+        <div>💬 ${esc(s.tgName)}${s.username ? ` · <a href="#" id="chat">@${esc(s.username)}</a>` : ""}</div>
+      </div>
+      <div class="chips" style="margin-top:12px">${Object.entries(STATUS).map(([k, n]) => `<button class="chip ${s.status === k ? "on" : ""}" data-st="${k}">${n}</button>`).join("")}</div>
+    </div>
+    <div class="card">
+      <b>📈 일한 기록</b> <span class="muted">출근 ${s.workOk} · 빵꾸 ${s.workNo}</span>
+      ${s.hist.length ? s.hist.map((h) => `<div class="hist">${h.r === "ok" ? "✅" : "❌"} ${esc(h.date)} · <a href="#job=${h.job}">#${h.job}</a> ${esc(h.title ?? "")}</div>`).join("") : `<div class="muted" style="margin-top:6px">아직 기록이 없어요</div>`}
+    </div>
+    <div class="card">
+      <b>📝 메모</b> <span class="muted">(혜승·관리자만 봐요)</span>
+      <textarea id="note" style="min-height:80px;margin-top:8px">${esc(s.note)}</textarea>
+      <div class="btns"><button class="btn sm" id="saveNote">저장</button></div>
+    </div>
+    <div class="muted" style="padding:0 4px">등록 ${new Date(s.createdAt).toLocaleDateString("ko-KR")} · 최근 ${ago(s.updatedAt)}</div>`;
+  $("#chat") && ($("#chat").onclick = (e) => { e.preventDefault(); tg?.openTelegramLink(`https://t.me/${s.username}`); });
+  document.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { try { haptic(); await api("status", { uid: s.id, status: b.dataset.st }); s.status = b.dataset.st; toast(`${STATUS[s.status]}로 바꿨어요`); renderStudent(id); } catch (e) { toast("⚠️ " + e.message); } }));
+  $("#saveNote").onclick = async () => { try { await api("note", { uid: s.id, note: $("#note").value }); s.note = $("#note").value; toast("💾 저장했어요"); } catch (e) { toast("⚠️ " + e.message); } };
+}
+
+// ── ✍️ 새 공고 ──
+let countTimer = null;
+function renderNew() {
+  const offs = NEW.kind === "urgent" ? [0, 1] : [0, 1, 2, 3, 4, 5];
+  if (NEW.kind === "urgent" && (NEW.off == null || NEW.off > 1)) NEW.off = 0;
+  const slotsAuto = (/(\d{1,3})\s*명/.exec(NEW.text) || [])[1];
+  const c = (k, v, n) => `<button class="chip ${String(NEW[k]) === String(v) ? "on" : ""}" data-n="${k}" data-v="${v}">${n}</button>`;
+  $("#view").innerHTML = `
+    <div class="card">
+      <label class="f" style="margin-top:0">공고 종류</label>
+      <div class="chips">${c("kind", "urgent", "🚨 긴급 (오늘·내일)")}${c("kind", "normal", "📢 일반 (5일 안)")}</div>
+      <label class="f">일하는 날</label>
+      <div class="chips">${offs.map((o) => c("off", o, (o === 0 ? "오늘 " : o === 1 ? "내일 " : "") + kst(o))).join("")}${NEW.kind === "normal" ? c("off", "", "날짜 상관없음") : ""}</div>
+      <label class="f">공고 내용 <span class="muted">(지금 그룹방에 쓰는 모양 그대로)</span></label>
+      <textarea id="text" placeholder="365로지스 / 4명&#10;단순 하차 업무&#10;위치 : 일산 설문동 606&#10;근무시간 : 7시-12시&#10;시급 : 11,000원">${esc(NEW.text)}</textarea>
+      <label class="f">모집 인원 <span class="muted">${slotsAuto ? `(글에서 ${slotsAuto}명 읽음 — 바꾸려면 입력)` : "(글에 'N명'이 있으면 자동)"}</span></label>
+      <input id="slots" inputmode="numeric" placeholder="${slotsAuto ?? "비우면 인원 안 셈"}" value="${esc(NEW.slots)}">
+    </div>
+    <div class="card">
+      <label class="f" style="margin-top:0">보낼 곳</label>
+      <div class="chips">${c("where", "g", "👥 그룹방(채널)")}${c("where", "d", "📩 맞는 학생 1:1")}${c("where", "b", "👥 + 📩 둘 다")}</div>
+      ${NEW.where !== "g" ? `
+        <label class="f">1:1 받을 학생 조건 <span class="muted">(일하는 날 수업 없는 학생만)</span></label>
+        <div class="chips">${c("topik", 0, "TOPIK 상관없음")}${c("topik", 1, "1급↑")}${c("topik", 2, "3급↑")}${c("topik", 3, "4급↑")}</div>
+        <div class="chips">${c("gender", "", "성별 상관없음")}${c("gender", 0, "남자만")}${c("gender", 1, "여자만")}</div>
+        <div class="chips"><button class="chip ${NEW.car ? "on" : ""}" id="car">🚗 차 있어야 함</button><button class="chip ${NEW.noFlaky ? "on" : ""}" id="nf">⚠️ 빵꾸 2번↑ 빼기</button></div>
+        <div class="count" id="cnt">맞는 학생 세는 중…</div>` : ""}
+      <div class="btns"><button class="btn" id="send" style="flex:1">보내기</button></div>
+    </div>`;
+  const sync = () => { NEW.text = $("#text").value; NEW.slots = $("#slots").value; };
+  $("#text").oninput = () => { sync(); const m = (/(\d{1,3})\s*명/.exec(NEW.text) || [])[1]; $("#slots").placeholder = m ?? "비우면 인원 안 셈"; };
+  $("#slots").oninput = sync;
+  document.querySelectorAll("[data-n]").forEach((b) => (b.onclick = () => { sync(); const k = b.dataset.n; const v = b.dataset.v; NEW[k] = v === "" ? (k === "off" ? null : "") : isNaN(Number(v)) ? v : Number(v); renderNew(); }));
+  $("#car") && ($("#car").onclick = () => { sync(); NEW.car = !NEW.car; renderNew(); });
+  $("#nf") && ($("#nf").onclick = () => { sync(); NEW.noFlaky = !NEW.noFlaky; renderNew(); });
+  if (NEW.where !== "g") {
+    clearTimeout(countTimer);
+    countTimer = setTimeout(async () => {
+      try {
+        const r = await api("count", { filter: { off: NEW.off, topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const el = $("#cnt"); if (!el) return;
+        el.innerHTML = `📩 맞는 학생 <b>${r.count}명</b>${r.count ? `<div class="muted" style="margin-top:4px">${r.sample.slice(0, 12).map((s) => `${badge(s)}${esc(s.name)}`).join(", ")}${r.count > 12 ? " …" : ""}</div>` : ""}`;
+      } catch (e) { const el = $("#cnt"); if (el) el.textContent = "⚠️ " + e.message; }
+    }, 250);
+  }
+  $("#send").onclick = () => {
+    sync();
+    if (!NEW.text.trim()) return toast("공고 내용을 써 주세요");
+    const where = { g: "그룹방(채널)에 올릴까요?", d: "맞는 학생에게 1:1로 보낼까요?", b: "그룹방에 올리고 1:1로도 보낼까요?" }[NEW.where];
+    const go = async () => {
+      const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
+      try {
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
+        Object.assign(NEW, { text: "", slots: "" });
+        await load(); setTab("jobs"); location.hash = `job=${r.id}`;
+      } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "보내기"; }
+    };
+    tg?.showConfirm ? tg.showConfirm(where, (ok) => ok && go()) : go();
+  };
+}
+
+// ── 📊 현황 ──
+function renderStats() {
+  const s = DATA.stats;
+  $("#view").innerHTML = `
+    <div class="stat">
+      <div class="card"><span class="muted">전체 학생</span><b>${s.students}</b><span class="muted">🆕 신규 ${s.newStudents}명</span></div>
+      <div class="card"><span class="muted">이번 주 공고</span><b>${s.weekJobs}</b><span class="muted">지원 ${s.weekApplies}건</span></div>
+      <div class="card"><span class="muted">이번 주 충원율</span><b>${s.fillRate == null ? "-" : s.fillRate + "%"}</b><span class="muted">인원 쓴 공고 기준</span></div>
+      <div class="card"><span class="muted">이번 주 빵꾸</span><b>${s.weekNoShow}</b><span class="muted">출근 확인 기준</span></div>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <b>⚠️ 빵꾸 많은 학생</b>
+      ${s.flaky.length ? s.flaky.map((x) => `<div class="hist"><a href="#stu=${x.id}">${esc(x.name)}</a> · 빵꾸 ${x.workNo} · 출근 ${x.workOk}</div>`).join("") : `<div class="muted" style="margin-top:6px">없어요 👍</div>`}
+    </div>`;
+}
+
+(async () => { if (await load()) render(); })();
+document.addEventListener("visibilitychange", async () => { if (!document.hidden && DATA) { await load(); render(); } });
+</script>
+</body>
+</html>

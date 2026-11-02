@@ -1,6 +1,6 @@
 // 처음 한 번만: 브라우저로 https://<봇 주소>/api/setup?key=<WEBHOOK_SECRET> 열기
 //  → 웹훅 연결 + 봇 소개문·명령어 설정 (컴퓨터에 아무것도 설치할 필요 없음)
-import { bot, ALLOWED_UPDATES, ADMIN_COMMANDS } from "../src/bot.js";
+import { bot, ALLOWED_UPDATES, ADMIN_COMMANDS, setMenuButtons } from "../src/bot.js";
 
 export default async function handler(req, res) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -29,6 +29,7 @@ export default async function handler(req, res) {
         .then(() => done.push(`✅ 관리자 메뉴 (${id})`))
         .catch((e) => done.push(`⚠️ 관리자 메뉴 실패 (${id}): 그 사람이 봇에 /start 를 먼저 눌러야 해요 — ${e.description ?? e.message}`));
     }
+    await setMenuButtons(api).then(() => done.push("✅ 메뉴 버튼 (학생 💼 Ish · 관리자 🛠 관리)")).catch((e) => done.push(`⚠️ 메뉴 버튼 실패: ${e.description ?? e.message}`));
     const me = await api.getMe();
     done.push(`\n완료! https://t.me/${me.username}`);
     res.setHeader("Content-Type", "text/plain; charset=utf-8");

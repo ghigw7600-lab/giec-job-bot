@@ -27,7 +27,10 @@ bot.use(async (ctx, next) => {
   if (id != null && !(await kv.setNX(`upd:${id}`, 1, 600).catch(() => true))) return;
   await next();
   // 관리자 메뉴(입력창 / 목록)를 새 명령어로 한 번 갱신
-  if (await kv.setNX("cmds:v3", 1, 365 * 24 * 3600).catch(() => false)) await setAdminCommands(ctx.api).catch(() => {});
+  if (await kv.setNX("cmds:v4", 1, 365 * 24 * 3600).catch(() => false)) {
+    await setAdminCommands(ctx.api).catch(() => {});
+    await setMenuButtons(ctx.api).catch(() => {});
+  }
   // 10분에 한 번, 들어온 메시지를 처리하는 김에 "이어서 하기" 알림도 확인 (따로 예약 서비스 필요 없음)
   if (await kv.setNX("remind:lock", 1, 600).catch(() => false)) await runReminders(ctx.api).catch((e) => console.error("알림 실패:", e.message));
 });
@@ -35,11 +38,20 @@ bot.use(async (ctx, next) => {
 // ── 관리자 ──
 export const ADMIN_COMMANDS = [
   { command: "find", description: "공고 올리기 (긴급·일반) · 학생 찾기" },
+  { command: "jobs", description: "관리 화면 열기 (공고·학생·현황)" },
   { command: "joinlink", description: "그룹 환영 링크" },
   { command: "pinpost", description: "정보 남기기 버튼 글 고정" },
   { command: "export", description: "지원자 엑셀(CSV)" },
   { command: "help", description: "도움말" },
 ];
+// 입력창 왼쪽 메뉴 버튼: 학생 = [💼 Ish] 공고판 · 관리자 = [🛠 관리] 관리 미니앱
+export async function setMenuButtons(api) {
+  if (!baseUrl()) return;
+  await api.setChatMenuButton({ menu_button: { type: "web_app", text: "💼 Ish", web_app: { url: boardUrl() } } });
+  for (const id of adminIds()) {
+    await api.setChatMenuButton({ chat_id: id, menu_button: { type: "web_app", text: "🛠 관리", web_app: { url: adminAppUrl() } } }).catch(() => {});
+  }
+}
 async function setAdminCommands(api) {
   for (const id of adminIds()) await api.setMyCommands(ADMIN_COMMANDS, { scope: { type: "chat", chat_id: id } }).catch(() => {});
 }
@@ -48,7 +60,7 @@ const adminIds = () =>
     .split(",")
     .map((s) => Number(s.trim()))
     .filter(Boolean);
-const isAdmin = (id) => adminIds().includes(Number(id));
+export const isAdmin = (id) => adminIds().includes(Number(id));
 
 // ── 저장 ──
 const K = {
@@ -58,7 +70,16 @@ const K = {
   channel: "channel", // 봇이 관리자로 있는 채널 { id, title }
   joinlink: "joinlink",
   pending: "pending", // 입력을 시작했거나 인사만 받은 학생 (아직 다 안 냄)
+  jobs: "jobs", // 공고 번호 목록
+  jobApps: (id) => `jobapps:${id}`, // 그 공고 지원자 id 목록
+  jobApp: (id, uid) => `jobapp:${id}:${uid}`, // 지원 시각 등
 };
+const JOB_TTL = 120 * 24 * 3600;
+// 미니앱 주소 (Vercel 이 알려주는 내 주소)
+export const baseUrl = () =>
+  process.env.APP_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null);
+const adminAppUrl = (hash = "") => (baseUrl() ? `${baseUrl()}/admin/${hash ? `#${hash}` : ""}` : null);
+const boardUrl = () => (baseUrl() ? `${baseUrl()}/jobs/` : null);
 const STATE_TTL = 7 * 24 * 3600;
 const getState = (id) => kv.get(K.state(id));
 const setState = async (id, s) => {
@@ -220,6 +241,7 @@ async function finish(ctx, st) {
   };
   await clearState(id);
   await ctx.reply(tx(st.lang, "done"), { reply_markup: { remove_keyboard: true } });
+  if (boardUrl()) await ctx.reply(tx(st.lang, "wbOpenHint"), { reply_markup: new InlineKeyboard().webApp(tx(st.lang, "wbOpen"), boardUrl()) }).catch(() => {});
   const title = prev ? `✏️ 다시 신청 (이전: ${STATUS[prev.status] ?? STATUS.new})` : "🆕 새 지원자";
   await saveAndCard(ctx.api, app, `${app.test ? "🧪 테스트 · " : ""}${title}`);
   const want = await kv.get(`wantjob:${id}`);
@@ -246,6 +268,9 @@ const STATUS = {
   introduced: "🟢 소개함",
   closed: "⚫ 종결",
 };
+// 일한 기록 표시: ⭐ 출근 3번 이상 + 빵꾸 0 · ⚠️ 빵꾸 2번 이상
+export const relBadge = (a) => ((a.workNo ?? 0) >= 2 ? "⚠️" : (a.workOk ?? 0) >= 3 && !(a.workNo ?? 0) ? "⭐" : "");
+const workLine = (a) => (a.workOk || a.workNo ? `📈 일한 기록: 출근 ${a.workOk ?? 0} · 빵꾸 ${a.workNo ?? 0} ${relBadge(a)}`.trim() : null);
 const dayText = (days) => (days?.length ? [...days].sort().map((i) => KO.days[i]).join("·") : "없음");
 
 export function cardText(app, title) {
@@ -264,6 +289,7 @@ export function cardText(app, title) {
     `🚗 자동차: ${KO.car[app.car] ?? "-"}`,
     `📅 수업 요일: ${dayText(app.days)}`,
     `💬 텔레그램: ${tg}`,
+    ...(workLine(app) ? [workLine(app)] : []),
     `🌐 언어: ${langName(app.lang)}`,
     line,
     `상태: ${st}${app.statusBy ? ` — ${esc(app.statusBy)} · ${nowKST(app.statusAt)}` : ""}`,
@@ -271,13 +297,20 @@ export function cardText(app, title) {
   ].join("\n");
 }
 
-const cardKeyboard = (id) =>
+const cardKeyboard = (id) => {
+  const kb = cardKeyboardBase(id);
+  if (!adminAppUrl()) kb.inline_keyboard.pop(); // 미니앱 주소가 없으면 마지막 줄(관리 화면) 빼기
+  return kb;
+};
+const cardKeyboardBase = (id) =>
   new InlineKeyboard()
     .text("🟡 연락함", `a:st:contacted:${id}`)
     .text("🟢 소개함", `a:st:introduced:${id}`)
     .text("⚫ 종결", `a:st:closed:${id}`)
     .row()
-    .text("🔄 수업 요일 다시 받기", `a:days:${id}`);
+    .text("🔄 수업 요일 다시 받기", `a:days:${id}`)
+    .row()
+    .webApp("📋 관리 화면에서 보기", adminAppUrl(`stu=${id}`) ?? "https://t.me");
 
 async function notifyAdmins(api, app, title) {
   for (const admin of adminIds()) {
@@ -373,6 +406,9 @@ pm.command("start", async (ctx) => {
   await clearState(ctx.from.id);
   const app = await kv.get(K.app(ctx.from.id));
   // 그룹방 공고의 [🙋 지원하기]로 들어옴
+  if (payload === "jobs" && boardUrl()) {
+    return ctx.reply(tx(lang, "wbOpenHint"), { reply_markup: new InlineKeyboard().webApp(tx(lang, "wbOpen"), boardUrl()) });
+  }
   const jobId = /^job_(\d+)$/.exec(payload)?.[1];
   if (jobId) {
     if (app) return ctx.reply((await applyJob(ctx.api, ctx.from, jobId)).msg);
@@ -392,6 +428,7 @@ const HELP = [
   "",
   "/joinlink — 채널 환영 링크 (이 링크로 들어오면 봇이 인사 + 정보 받기)",
   "/pinpost — 채널에 [정보 남기기] 버튼 글 올리고 고정 (이미 있는 학생용)",
+  "/jobs — 🛠 관리 화면 (공고별 지원자·마감·다시 올리기·출근 기록 / 학생 표 / 현황) — 입력창 왼쪽 [🛠 관리] 버튼과 같아요",
   "/find — 공고 올리기: 🚨 긴급(오늘·내일) / 📅 일반(5일 안) → 학생 찾기 → 그룹방·1:1로 보내기 → 🔒 마감",
   "/export — 지원자 전체 엑셀(CSV)",
   "/start test — 학생 화면 직접 해보기 (기록은 🧪 테스트로 표시, 엑셀에서 빠짐)",
@@ -470,6 +507,8 @@ admin.command("pinpost", async (ctx) => {
   const share = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("💼 GIEC JOB — Koreyada talabalar uchun ish")}`;
   const kb = new InlineKeyboard()
     .url("📝 정보 남기기 · Ma'lumot qoldirish", `https://t.me/${botName}?start=apply`)
+    .row()
+    .url("💼 모집 중인 일 · Ishlar ro'yxati", `https://t.me/${botName}?start=jobs`)
     .row()
     .url("📤 친구에게 보내기 · Do'stlarga yuborish", share);
   try {
@@ -686,6 +725,8 @@ const dateLabel = (off) => {
   const d = kstDate(off);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[dayOf(off)]})`;
 };
+const isoDate = (off) => kstDate(off).toISOString().slice(0, 10);
+export const todayISO = () => isoDate(0);
 const FIND_TTL = 3 * 3600;
 const findKey = (a) => `find:${a}`;
 const postKey = (a) => `post:${a}`;
@@ -720,8 +761,15 @@ const findKeyboard = (f) => {
   TOPIK_MIN.forEach(([n, v]) => kb.text(mark(f.topik === v, n), `f:t:${v}`));
   kb.row().text(mark(!f.car, "차 상관없음"), "f:c:0").text(mark(f.car, "차 있어야 함"), "f:c:1").row();
   GENDER.forEach(([n, v]) => kb.text(mark((f.gender ?? null) === v, n), `f:g:${v ?? "any"}`));
+  kb.row().text(mark(!!f.noFlaky, "⚠️ 빵꾸 2번 이상 빼기"), `f:n:${f.noFlaky ? 0 : 1}`);
   return kb.row().text("🔎 찾기", "f:go");
 };
+
+admin.command("jobs", (ctx) =>
+  adminAppUrl()
+    ? ctx.reply("🛠 관리 화면 — 공고 · 학생 · 현황", { reply_markup: new InlineKeyboard().webApp("🛠 관리 화면 열기", adminAppUrl()) })
+    : ctx.reply("⚠️ 미니앱 주소를 몰라요 (Vercel 배포 주소 확인 필요)")
+);
 
 admin.command("find", (ctx) =>
   ctx.reply("어떤 공고인가요?", {
@@ -737,7 +785,7 @@ bot.callbackQuery(/^f:k:(urgent|normal)$/, async (ctx) => {
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
 
-bot.callbackQuery(/^f:(o|t|c|g):(\w+)$/, async (ctx) => {
+bot.callbackQuery(/^f:(o|t|c|g|n):(\w+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
@@ -746,6 +794,7 @@ bot.callbackQuery(/^f:(o|t|c|g):(\w+)$/, async (ctx) => {
   if (k === "t") f.topik = Number(v);
   if (k === "c") f.car = v === "1";
   if (k === "g") f.gender = v === "any" ? null : Number(v);
+  if (k === "n") f.noFlaky = v === "1";
   await kv.set(findKey(ctx.from.id), f, FIND_TTL);
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
@@ -757,12 +806,18 @@ export async function findStudents(f) {
   return (await kv.mget(ids.map(K.app)))
     .filter((a) => a && !a.test && !isAdmin(a.id) && a.status !== "closed")
     .filter((a) => freeOn(a, day) && (a.topik ?? 0) >= f.topik && (!f.car || a.car === 0) && (f.gender == null || a.gender === f.gender))
-    .sort((a, b) => (b.topik ?? 0) - (a.topik ?? 0) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    .filter((a) => !f.noFlaky || (a.workNo ?? 0) < 2)
+    .sort(
+      (a, b) =>
+        (b.workOk ?? 0) - (b.workNo ?? 0) * 2 - ((a.workOk ?? 0) - (a.workNo ?? 0) * 2) ||
+        (b.topik ?? 0) - (a.topik ?? 0) ||
+        (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+    );
 }
 
 const LIST_MAX = 30;
 const studentLine = (a, i) =>
-  `${i + 1}. <a href="tg://user?id=${a.id}">${esc(a.name)}</a> · ${KO.gender[a.gender] ?? "성별?"} ${esc(a.age)}세 · ${a.phone ? `<code>${esc(a.phone)}</code>` : "번호 없음"} · ${esc(a.school)} · TOPIK ${KO.topik[a.topik] ?? "-"}${a.car === 0 ? " · 🚗" : ""}${a.status === "introduced" ? " · 🟢" : ""}`;
+  `${i + 1}. ${relBadge(a)}<a href="tg://user?id=${a.id}">${esc(a.name)}</a> · ${KO.gender[a.gender] ?? "성별?"} ${esc(a.age)}세 · ${a.phone ? `<code>${esc(a.phone)}</code>` : "번호 없음"} · ${esc(a.school)} · TOPIK ${KO.topik[a.topik] ?? "-"}${a.car === 0 ? " · 🚗" : ""}${a.status === "introduced" ? " · 🟢" : ""}`;
 
 bot.callbackQuery("f:go", async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
@@ -778,7 +833,7 @@ bot.callbackQuery("f:go", async (ctx) => {
     if (unknown) lines.push(`ℹ️ 성별을 입력하기 전에 정보를 낸 학생 ${unknown}명은 빠졌어요 (다시 신청하면 성별을 물어봐요)`);
   }
   return ctx.reply(
-    [head, "", ...(lines.length ? lines : ["(맞는 학생이 없어요 — 그룹방에만 올려도 돼요)"]), "", "🚗 = 차 있음 · 🟢 = 이미 일 소개받은 학생 · 이름을 누르면 대화로 가요."].join("\n"),
+    [head, "", ...(lines.length ? lines : ["(맞는 학생이 없어요 — 그룹방에만 올려도 돼요)"]), "", "🚗 = 차 있음 · 🟢 = 이미 일 소개받은 학생 · ⭐ = 성실(출근 3번↑) · ⚠️ = 빵꾸 2번↑ · 이름을 누르면 대화로 가요."].join("\n"),
     { ...html, link_preview_options: { is_disabled: true }, reply_markup: whereKeyboard(list.length) }
   );
 });
@@ -862,6 +917,7 @@ admin.on("message", async (ctx, next) => {
     kind: f.kind,
     off: f.off,
     dateLabel: f.off == null ? null : dateLabel(f.off),
+    date: f.off == null ? null : isoDate(f.off),
     from: ctx.chat.id,
     msgId: m.message_id,
     text: m.text ?? null,
@@ -873,7 +929,7 @@ admin.on("message", async (ctx, next) => {
   // 모집 인원: 공고 글에서 "4명"을 찾아 읽음 → 지원할 때마다 그룹방에 "N명 남았습니다", 다 차면 자동 마감
   const slotMatch = /(\d{1,3})\s*명/.exec(job.text ?? job.caption ?? "");
   job.slots = slotMatch ? Number(slotMatch[1]) : null;
-  await kv.set(`job:${jobId}`, job, 60 * 24 * 3600);
+  await kv.set(`job:${jobId}`, job, JOB_TTL);
   await kv.set(postKey(ctx.from.id), { step: "confirm", jobId, where: p.where ?? "g" }, 1800);
   const where = p.where ?? "g";
   const n = job.ids.length;
@@ -906,6 +962,64 @@ bot.callbackQuery("p:cancel", async (ctx) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEND_MAX = 150; // 1:1 한 번에 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
 
+// 관리 미니앱에서 새 공고 만들기 (글만)
+export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [] }) {
+  const id = await kv.incr("jobseq");
+  const m = /(\d{1,3})\s*명/.exec(text ?? "");
+  const job = {
+    id,
+    kind,
+    off,
+    dateLabel: off == null ? null : dateLabel(off),
+    date: off == null ? null : isoDate(off),
+    from: null,
+    msgId: null,
+    text,
+    caption: "",
+    ids,
+    by,
+    at: Date.now(),
+    slots: slots ? Number(slots) : m ? Number(m[1]) : null,
+  };
+  await kv.set(`job:${id}`, job, JOB_TTL);
+  return job;
+}
+
+// 공고 내보내기 (그룹방 / 1:1 / 둘 다) — 채팅 버튼과 관리 미니앱이 같이 씀
+export async function sendJobOut(api, job, where, username) {
+  const out = [];
+  if (where !== "d") {
+    const ch = await kv.get(K.channel);
+    if (!ch) out.push("⚠️ 그룹방(채널)을 아직 몰라요 (/joinlink 안내 참고)");
+    else {
+      try {
+        const msg = await sendTo(api, ch.id, job, groupBody(job), groupMarkup(username, job.id));
+        job.group = { chat: ch.id, msgId: msg.message_id };
+        out.push("👥 그룹방(채널)에 올렸어요");
+      } catch (e) {
+        out.push(`⚠️ 그룹방(채널)에 못 올렸어요: ${e.description ?? e.message}`);
+      }
+    }
+  }
+  if (where !== "g") {
+    const apps = (await kv.mget((job.ids ?? []).slice(0, SEND_MAX).map(K.app))).filter(Boolean);
+    let ok = 0;
+    let fail = 0;
+    for (const a of apps) {
+      const lang = a.lang ?? "uz";
+      await sendTo(api, a.id, job, dmBody(job, lang), dmMarkup(lang, job.id)).then(() => ok++).catch(() => fail++);
+      await sleep(40);
+    }
+    out.push(`📩 ${ok}명에게 1:1로 보냈어요${fail ? ` (못 받은 학생 ${fail}명 — 봇을 차단했을 수 있어요)` : ""}`);
+    if ((job.ids ?? []).length > SEND_MAX) out.push(`⚠️ ${job.ids.length - SEND_MAX}명은 150명을 넘어서 빠졌어요`);
+  }
+  job.sentAt = Date.now();
+  job.where = where;
+  await kv.set(`job:${job.id}`, job, JOB_TTL);
+  await kv.sadd(K.jobs, job.id);
+  return out;
+}
+
 bot.callbackQuery(/^p:send:(\d+):(g|d|b)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   const [, jobId, where] = ctx.match;
@@ -915,44 +1029,42 @@ bot.callbackQuery(/^p:send:(\d+):(g|d|b)$/, async (ctx) => {
   await kv.del(postKey(ctx.from.id)); // 두 번 눌러도 한 번만
   await ctx.answerCallbackQuery({ text: "보내는 중…" });
   await ctx.editMessageText(`📤 공고 #${job.id} 보내는 중…`).catch(() => {});
-  const out = [];
-
-  if (where !== "d") {
-    const ch = await kv.get(K.channel);
-    if (!ch) out.push("⚠️ 그룹방을 아직 몰라요 (/joinlink 안내 참고)");
-    else {
-      try {
-        const msg = await sendTo(ctx.api, ch.id, job, groupBody(job), groupMarkup(ctx.me.username, job.id));
-        job.group = { chat: ch.id, msgId: msg.message_id };
-        out.push("👥 그룹방에 올렸어요");
-      } catch (e) {
-        out.push(`⚠️ 그룹방에 못 올렸어요: ${e.description ?? e.message}`);
-      }
-    }
-  }
-  if (where !== "g") {
-    const apps = (await kv.mget(job.ids.slice(0, SEND_MAX).map(K.app))).filter(Boolean);
-    let ok = 0;
-    let fail = 0;
-    for (const a of apps) {
-      const lang = a.lang ?? "uz";
-      await sendTo(ctx.api, a.id, job, dmBody(job, lang), dmMarkup(lang, job.id)).then(() => ok++).catch(() => fail++);
-      await sleep(40);
-    }
-    out.push(`📩 ${ok}명에게 1:1로 보냈어요${fail ? ` (못 받은 학생 ${fail}명 — 봇을 차단했을 수 있어요)` : ""}`);
-    if (job.ids.length > SEND_MAX) out.push(`⚠️ ${job.ids.length - SEND_MAX}명은 150명을 넘어서 빠졌어요`);
-  }
-  await kv.set(`job:${job.id}`, job, 60 * 24 * 3600);
-  await ctx.editMessageText(`✅ 공고 #${job.id}\n${out.join("\n")}\n🙋 지원한 학생은 바로 알려드릴게요.`, {
-    reply_markup: new InlineKeyboard().text("🔒 마감 (자리 다 참)", `p:close:${job.id}`),
-  }).catch(() => {});
+  const out = await sendJobOut(ctx.api, job, where, ctx.me.username);
+  const kb = new InlineKeyboard().text("🔒 마감 (자리 다 참)", `p:close:${job.id}`);
+  if (adminAppUrl()) kb.row().webApp("📋 관리 화면에서 보기", adminAppUrl(`job=${job.id}`));
+  await ctx.editMessageText(`✅ 공고 #${job.id}\n${out.join("\n")}\n🙋 지원한 학생은 바로 알려드릴게요.`, { reply_markup: kb }).catch(() => {});
 });
+
+// 📢 다시 올리기: 빵꾸 등으로 다시 뽑을 때 — 남은 인원으로 새 공고를 맨 아래에 올리고 예전 공고는 마감
+export async function repostJob(api, old, username, slots) {
+  const id = await kv.incr("jobseq");
+  const job = {
+    ...old,
+    id,
+    kind: "urgent",
+    slots: slots ?? old.slots ?? null,
+    group: null,
+    closed: false,
+    att: {},
+    attAsked: 0,
+    repostOf: old.id,
+    at: Date.now(),
+    ids: [],
+  };
+  await kv.set(`job:${id}`, job, JOB_TTL);
+  old.repostedTo = id;
+  if (!old.closed) await closeJob(api, old);
+  else await kv.set(`job:${old.id}`, old, JOB_TTL);
+  const out = await sendJobOut(api, job, "g", username);
+  return { job, out };
+}
 
 // 마감: 그룹방 공고에 표시 + 버튼 없앰, 1:1 버튼도 더는 안 받음
 // 마감: 그룹방 공고에 표시 + 버튼 없앰, 그 뒤 지원은 "마감" 안내
-async function closeJob(api, job) {
+export async function closeJob(api, job) {
   job.closed = true;
-  await kv.set(`job:${job.id}`, job, 60 * 24 * 3600);
+  job.closedAt ??= Date.now();
+  await kv.set(`job:${job.id}`, job, JOB_TTL);
   if (!job.group) return;
   const text = groupBody(job, true);
   const edit = job.text != null
@@ -961,9 +1073,9 @@ async function closeJob(api, job) {
   await edit.catch(() => {});
 }
 // 다시 열기 (마감 뒤 지원 취소로 자리가 생겼을 때)
-async function reopenJob(api, job, username) {
+export async function reopenJob(api, job, username) {
   job.closed = false;
-  await kv.set(`job:${job.id}`, job, 60 * 24 * 3600);
+  await kv.set(`job:${job.id}`, job, JOB_TTL);
   if (!job.group) return;
   const opts = { parse_mode: "HTML", reply_markup: groupMarkup(username, job.id) };
   const edit = job.text != null
@@ -993,12 +1105,12 @@ bot.callbackQuery(/^p:close:(\d+)$/, async (ctx) => {
 });
 
 // 지원 접수 (1:1 버튼이든 그룹방 버튼이든 여기로) → 관리자 알림
-async function applyJob(api, from, jobId) {
+export async function applyJob(api, from, jobId) {
   const job = await kv.get(`job:${jobId}`);
   const app = await kv.get(K.app(from.id));
   const lang = app?.lang ?? (await getLang(from));
   if (!job || job.closed) return { lang, msg: tx(lang, "jobClosed") };
-  if (!(await kv.setNX(`jobyes:${jobId}:${from.id}`, 1, 60 * 24 * 3600))) return { lang, msg: tx(lang, "jobYes") };
+  if (!(await kv.setNX(`jobyes:${jobId}:${from.id}`, 1, JOB_TTL))) return { lang, msg: tx(lang, "jobYes"), already: true };
   // 인원 세기 (선착순)
   let left = null;
   if (job.slots) {
@@ -1013,6 +1125,8 @@ async function applyJob(api, from, jobId) {
     await postRemaining(api, job, left);
     if (left === 0) await closeJob(api, job);
   }
+  await kv.sadd(K.jobApps(jobId), from.id);
+  await kv.set(K.jobApp(jobId, from.id), { at: Date.now() }, JOB_TTL);
   const who = app
     ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"} · 차 ${KO.car[app.car] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
     : [`👤 <a href="tg://user?id=${from.id}">${esc(fullName(from))}</a>`];
@@ -1029,27 +1143,158 @@ async function applyJob(api, from, jobId) {
         {
           ...html,
           link_preview_options: { is_disabled: true },
-          reply_markup: job.slots ? new InlineKeyboard().text("↩️ 이 지원 취소 (자리 다시 열기)", `a:unapply:${jobId}:${from.id}`) : undefined,
+          reply_markup: (() => {
+            const kb = new InlineKeyboard().text("↩️ 이 지원 취소 (자리 다시 열기)", `a:unapply:${jobId}:${from.id}`);
+            if (adminAppUrl()) kb.row().webApp("📋 관리 화면에서 보기", adminAppUrl(`job=${jobId}`));
+            return kb;
+          })(),
         }
       )
       .catch(() => {});
   }
-  return { lang, msg: tx(lang, "jobYes") };
+  return { lang, msg: tx(lang, "jobYes"), ok: true };
 }
 
 // 관리자: 지원 취소 (안 온다고 하거나 잘못 지원) → 자리 하나 다시 열고 그룹방에 남은 인원 알림
+// 지원 취소 → 자리 다시 열기 (채팅 버튼 · 관리 미니앱 같이 씀)
+export async function unapplyJob(api, jobId, uid, username) {
+  const job = await kv.get(`job:${jobId}`);
+  if (!job || !(await kv.get(`jobyes:${jobId}:${uid}`))) return { ok: false, error: "이미 취소됐거나 없는 지원이에요." };
+  await kv.del(`jobyes:${jobId}:${uid}`);
+  await kv.srem(K.jobApps(jobId), uid);
+  await kv.del(K.jobApp(jobId, uid));
+  let left = null;
+  if (job.slots) {
+    const taken = await kv.decr(`jobcnt:${jobId}`);
+    left = Math.max(0, job.slots - Math.max(0, taken));
+    if (job.repostedTo) {
+      // 이미 다시 올린 공고 → 예전 공고는 그대로 두고 기록만 정리
+    } else {
+      if (job.closed && left > 0) await reopenJob(api, job, username);
+      await postRemaining(api, job, left);
+    }
+  }
+  if (job.att?.[uid]) await setAttendance(jobId, uid, null);
+  return { ok: true, left };
+}
+
 bot.callbackQuery(/^a:unapply:(\d+):(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   const [, jobId, uid] = ctx.match;
-  const job = await kv.get(`job:${jobId}`);
-  if (!job || !(await kv.get(`jobyes:${jobId}:${uid}`))) return ctx.answerCallbackQuery({ text: "이미 취소됐거나 없는 지원이에요.", show_alert: true });
-  await kv.del(`jobyes:${jobId}:${uid}`);
-  const taken = await kv.decr(`jobcnt:${jobId}`);
-  const left = Math.max(0, job.slots - Math.max(0, taken));
-  if (job.closed && left > 0) await reopenJob(ctx.api, job, ctx.me.username);
-  await postRemaining(ctx.api, job, left);
-  await ctx.answerCallbackQuery({ text: `↩️ 취소했어요 — 남은 인원 ${left}명` });
+  const r = await unapplyJob(ctx.api, jobId, uid, ctx.me.username);
+  if (!r.ok) return ctx.answerCallbackQuery({ text: r.error, show_alert: true });
+  await ctx.answerCallbackQuery({ text: `↩️ 취소했어요${r.left != null ? ` — 남은 인원 ${r.left}명` : ""}` });
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+});
+
+// ═════════════ ✅ 출근 / ❌ 빵꾸 기록 ═════════════
+//  일한 날 저녁 8시쯤 관리자에게 공고별로 묻기 → [✅ 모두 출근] 한 번 또는 빵꾸만 표시
+//  답이 없으면 다음 날 아침 한 번 더. 학생에게는 아무것도 안 감
+export async function jobApplicants(jobId) {
+  const ids = (await kv.smembers(K.jobApps(jobId))) ?? [];
+  const apps = await kv.mget(ids.map(K.app));
+  return ids.map((id, i) => apps[i] ?? { id: Number(id), name: `#${id}` });
+}
+
+// r = "ok" | "no" | null(지우기)
+export async function setAttendance(jobId, uid, r) {
+  const job = await kv.get(`job:${jobId}`);
+  if (!job) return null;
+  job.att ??= {};
+  const prev = job.att[uid] ?? null;
+  if (prev === r) return job;
+  if (r) job.att[uid] = r;
+  else delete job.att[uid];
+  await kv.set(`job:${jobId}`, job, JOB_TTL);
+  const app = await kv.get(K.app(uid));
+  if (app) {
+    app.workOk = (app.workOk ?? 0) + (r === "ok" ? 1 : 0) - (prev === "ok" ? 1 : 0);
+    app.workNo = (app.workNo ?? 0) + (r === "no" ? 1 : 0) - (prev === "no" ? 1 : 0);
+    app.hist = (app.hist ?? []).filter((h) => h.job !== Number(jobId));
+    if (r) app.hist.unshift({ job: Number(jobId), date: job.date ?? todayISO(), r, title: (job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40) });
+    app.hist = app.hist.slice(0, 30);
+    await kv.set(K.app(uid), app);
+  }
+  return job;
+}
+
+const attText = (job, apps) =>
+  [
+    `📋 <b>출근 확인 — 공고 #${job.id}</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}`,
+    `└ ${esc((job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40))}`,
+    `지원자 ${apps.length}명 · 빵꾸 난 사람만 ❌, 나머지는 [✅ 모두 출근]`,
+    "",
+    ...apps.map((a, i) => {
+      const r = job.att?.[a.id];
+      return `${i + 1}. ${r === "ok" ? "✅" : r === "no" ? "❌" : "⬜"} ${esc(a.name)}`;
+    }),
+  ].join("\n");
+const attKeyboard = (job, apps) => {
+  const kb = new InlineKeyboard();
+  apps.forEach((a, i) => kb.text(`${i + 1}. ✅`, `a:att:${job.id}:${a.id}:ok`).text(`${i + 1}. ❌ 빵꾸`, `a:att:${job.id}:${a.id}:no`).row());
+  return kb.text("✅ 나머지 모두 출근했어요", `a:attall:${job.id}`);
+};
+
+async function askAttendance(api, job) {
+  const apps = await jobApplicants(job.id);
+  if (!apps.length) return false;
+  for (const a of adminIds()) {
+    await api.sendMessage(a, attText(job, apps), { ...html, reply_markup: attKeyboard(job, apps) }).catch(() => {});
+  }
+  return true;
+}
+
+// 정기 확인: 오늘 날짜 공고는 20시 이후, 날짜 없는 공고는 마감 다음 날 → 묻기 / 답 없으면 다음 날 10시 이후 한 번 더
+export async function checkAttendance(api) {
+  const h = hourKST();
+  const today = todayISO();
+  const ids = (await kv.smembers(K.jobs)) ?? [];
+  const jobs = (await kv.mget(ids.map((id) => `job:${id}`))).filter(Boolean);
+  let asked = 0;
+  for (const job of jobs) {
+    if (job.attDone) continue;
+    const day = job.date ?? (job.closedAt ? new Date(job.closedAt + 9 * 3600e3 + DAY).toISOString().slice(0, 10) : null);
+    if (!day) continue;
+    const apps = (await kv.smembers(K.jobApps(job.id))) ?? [];
+    if (!apps.length) continue;
+    const allMarked = apps.every((u) => job.att?.[u]);
+    if (allMarked) {
+      job.attDone = true;
+      await kv.set(`job:${job.id}`, job, JOB_TTL);
+      continue;
+    }
+    const n = job.attAsked ?? 0;
+    const first = n === 0 && (day < today || (day === today && h >= 20));
+    const second = n === 1 && day < today && h >= 10 && Date.now() - (job.attAskedAt ?? 0) > 10 * 3600e3;
+    if (!first && !second) continue;
+    job.attAsked = n + 1;
+    job.attAskedAt = Date.now();
+    await kv.set(`job:${job.id}`, job, JOB_TTL);
+    if (await askAttendance(api, job)) asked++;
+  }
+  return asked;
+}
+
+bot.callbackQuery(/^a:att:(\d+):(\d+):(ok|no)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const [, jobId, uid, r] = ctx.match;
+  const job = await setAttendance(jobId, uid, r);
+  if (!job) return ctx.answerCallbackQuery({ text: "공고를 찾을 수 없어요.", show_alert: true });
+  await ctx.answerCallbackQuery({ text: r === "ok" ? "✅ 출근" : "❌ 빵꾸" });
+  const apps = await jobApplicants(jobId);
+  await ctx.editMessageText(attText(job, apps), { ...html, reply_markup: attKeyboard(job, apps) }).catch(() => {});
+});
+bot.callbackQuery(/^a:attall:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const jobId = ctx.match[1];
+  const apps = await jobApplicants(jobId);
+  let job = await kv.get(`job:${jobId}`);
+  if (!job) return ctx.answerCallbackQuery();
+  for (const a of apps) if (!job.att?.[a.id]) job = await setAttendance(jobId, a.id, "ok");
+  job.attDone = true;
+  await kv.set(`job:${jobId}`, job, JOB_TTL);
+  await ctx.answerCallbackQuery({ text: "✅ 기록했어요" });
+  await ctx.editMessageText(attText(job, apps) + "\n\n✅ 출근 확인 끝", { ...html, reply_markup: { inline_keyboard: [] } }).catch(() => {});
 });
 
 // 학생: 1:1 공고에 관심 / 관심 없음
@@ -1122,6 +1367,7 @@ async function cleanupTemp(api) {
 
 export async function runReminders(api) {
   await cleanupTemp(api).catch(() => {});
+  await checkAttendance(api).catch((e) => console.error("출근 확인 실패:", e.message));
   const h = hourKST();
   if (h < 10 || h >= 22) return 0;
   let sent = 0;

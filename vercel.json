@@ -1,6 +1,11 @@
 {
   "regions": ["hnd1"],
   "functions": {
-    "api/webhook.js": { "maxDuration": 60 }
-  }
+    "api/webhook.js": { "maxDuration": 60 },
+    "api/mini.js": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron", "schedule": "5 1 * * *" },
+    { "path": "/api/cron", "schedule": "5 11 * * *" }
+  ]
 }

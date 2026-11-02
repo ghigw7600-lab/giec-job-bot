@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GIEC JOB</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+    --text: var(--tg-theme-text-color, #16181d);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --btn: var(--tg-theme-button-color, #2a6fdb);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; background: var(--bg2); color: var(--text); }
+  header { padding: 18px 16px 6px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header .sub { color: var(--hint); font-size: 13px; margin-top: 2px; }
+  main { padding: 8px 12px 24px; max-width: 640px; margin: 0 auto; }
+  .card { background: var(--bg); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .top { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .pill { padding: 2px 9px; border-radius: 999px; font-size: 12px; background: var(--bg2); color: var(--hint); }
+  .pill.urgent { background: #ffe6e6; color: #c0392b; font-weight: 600; }
+  .pill.left { background: #e8f0ff; color: #2a6fdb; font-weight: 600; }
+  .text { white-space: pre-wrap; font-size: 15px; }
+  .btn { width: 100%; margin-top: 12px; border: 0; border-radius: 12px; padding: 12px; font-size: 16px; font-weight: 600; background: var(--btn); color: var(--btn-text); }
+  .btn:disabled { background: var(--bg2); color: var(--hint); }
+  .empty { text-align: center; color: var(--hint); padding: 60px 20px; }
+  .skel { height: 120px; border-radius: 14px; background: linear-gradient(90deg, var(--bg) 0%, var(--bg2) 50%, var(--bg) 100%); background-size: 200% 100%; animation: sh 1.2s infinite; margin-bottom: 12px; }
+  @keyframes sh { to { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+<header><h1 id="title">💼 GIEC JOB</h1><div class="sub" id="sub"></div></header>
+<main id="list"><div class="skel"></div><div class="skel"></div></main>
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let D = null;
+
+async function api(action, args = {}) {
+  const r = await fetch("/api/mini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, initData: tg?.initData ?? "", ...args }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Error");
+  return j;
+}
+
+function render() {
+  const t = D.t;
+  document.getElementById("title").textContent = "💼 " + t.title;
+  const el = document.getElementById("list");
+  if (!D.jobs.length) { el.innerHTML = `<div class="empty">${esc(t.empty)}</div>`; return; }
+  el.innerHTML = D.jobs.map((j) => `
+    <div class="card">
+      <div class="top">
+        ${j.urgent ? `<span class="pill urgent">🚨 ${esc(t.urgent)}</span>` : ""}
+        ${j.dateLabel ? `<span class="pill">📅 ${esc(j.dateLabel)}</span>` : ""}
+        ${j.left != null ? `<span class="pill left">${esc(t.left.replace("{n}", j.left))}</span>` : ""}
+      </div>
+      <div class="text">${esc(j.text)}</div>
+      <button class="btn" data-id="${j.id}" ${j.applied || j.left === 0 ? "disabled" : ""}>${j.applied ? esc(t.applied) : j.left === 0 ? esc(t.closed) : esc(t.apply)}</button>
+    </div>`).join("");
+  document.querySelectorAll("[data-id]").forEach((b) => (b.onclick = () => apply(b)));
+}
+
+async function apply(b) {
+  const id = Number(b.dataset.id);
+  b.disabled = true;
+  try {
+    const r = await api("apply", { id });
+    if (r.needInfo) {
+      // 아직 정보를 안 낸 학생 → 봇으로 (정보 입력 후 자동 지원)
+      tg?.showAlert ? tg.showAlert(D.t.needInfo, () => { tg.openTelegramLink(r.link); tg.close(); }) : (location.href = r.link);
+      b.disabled = false;
+      return;
+    }
+    tg?.HapticFeedback?.notificationOccurred?.(r.ok ? "success" : "warning");
+    const j = D.jobs.find((x) => x.id === id);
+    if (r.ok) { j.applied = true; if (j.left != null) j.left = Math.max(0, j.left - 1); }
+    else if (r.closed) j.left = 0;
+    render();
+    if (r.msg) tg?.showAlert?.(r.msg);
+  } catch (e) {
+    b.disabled = false;
+    tg?.showAlert ? tg.showAlert("⚠️ " + e.message) : alert(e.message);
+  }
+}
+
+async function load() {
+  try { D = await api("board"); render(); }
+  catch (e) { document.getElementById("list").innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; }
+}
+load();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>
