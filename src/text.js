@@ -48,6 +48,7 @@ export const TEXT = {
     btnContinue: "▶️ Davom etish",
     pinPost: "💼 <b>Ish kerakmi?</b>\n\nBotga ma'lumotlaringizni qoldiring — menejerimiz siz bilan bog'lanadi.\nBor-yo'g'i 1 daqiqa ⏱\n\n👇 Pastdagi tugmani bosing",
     btnPin: "📝 Ma'lumot qoldirish",
+    groupHello: "{name}, xush kelibsiz! 👋\nIsh takliflarini olish uchun botga ma'lumot qoldiring — 1 daqiqa ⏱",
   },
   ru: {
     greet:
@@ -90,7 +91,8 @@ export const TEXT = {
     remind: "Вы не закончили заполнение 🙂\nОсталось немного — нажмите кнопку ниже 👇",
     btnContinue: "▶️ Продолжить",
     pinPost: "",
-    btnPin: "",
+    btnPin: "📝 Оставить данные",
+    groupHello: "{name}, добро пожаловать! 👋\nЧтобы получать вакансии, оставьте данные в боте — 1 минута ⏱",
   },
 };
 

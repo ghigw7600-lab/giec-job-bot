@@ -328,6 +328,21 @@ bot.on("message", async (ctx, next) => {
   const m = ctx.message;
   if (m.new_chat_members || m.left_chat_member) {
     await ctx.deleteMessage().catch(() => {});
+    // 안전망: 봇 환영 링크가 아닌 다른 링크로 들어온 학생(봇이 1:1 인사를 못 보낸 학생)
+    //  → 그룹에 조용히(알림 없이) 이름을 불러 [정보 남기기] 버튼 → 10분 뒤 자동으로 지움
+    for (const u of m.new_chat_members ?? []) {
+      if (u.is_bot || isAdmin(u.id)) continue;
+      if ((await kv.get(K.app(u.id))) || (await kv.get(K.state(u.id)))) continue; // 이미 정보를 냈거나 인사를 받은 학생
+      const lang = langOf(u.language_code);
+      const msg = await ctx.api
+        .sendMessage(chat.id, tx(lang, "groupHello").replace("{name}", `<a href="tg://user?id=${u.id}">${esc(u.first_name ?? "")}</a>`), {
+          parse_mode: "HTML",
+          disable_notification: true,
+          reply_markup: new InlineKeyboard().url(tx(lang, "btnPin"), `https://t.me/${ctx.me.username}?start=apply`),
+        })
+        .catch(() => null);
+      if (msg) await kv.rpush("tmpmsg", { chat: chat.id, id: msg.message_id, at: Date.now() }, 7 * 24 * 3600);
+    }
     return;
   }
   const ch = await kv.get(K.channel);
@@ -902,7 +917,21 @@ pm.on("message", async (ctx) => {
 const HOUR = 3600 * 1000;
 const hourKST = () => Number(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul", hour: "numeric", hourCycle: "h23" }));
 
+// 그룹에 잠깐 올린 안내(새 학생 이름 부르기) 10분 지나면 지우기
+async function cleanupTemp(api) {
+  const list = (await kv.lrange("tmpmsg")) ?? [];
+  if (!list.length) return;
+  const keep = [];
+  for (const t of list) {
+    if (Date.now() - t.at > 10 * 60 * 1000) await api.deleteMessage(t.chat, t.id).catch(() => {});
+    else keep.push(t);
+  }
+  await kv.del("tmpmsg");
+  for (const t of keep) await kv.rpush("tmpmsg", t, 7 * 24 * 3600);
+}
+
 export async function runReminders(api) {
+  await cleanupTemp(api).catch(() => {});
   const h = hourKST();
   if (h < 10 || h >= 22) return 0;
   let sent = 0;
