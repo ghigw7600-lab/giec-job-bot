@@ -8,7 +8,8 @@
 //  관리자(ADMIN_IDS, 기본 = 혜승) 명령어 — 봇과의 1:1 대화에서
 //   /joinlink  채널 환영 링크(가입 요청 링크) 받기   · /joinlink new 새로 만들기
 //   /pinpost   채널에 "정보 남기기" 버튼 글 올리고 고정 (이미 채널에 있는 학생용)
-//   /export    지원자 전체 엑셀(CSV) 받기
+//   /export    지원자 전체 엑셀(CSV) 받기 (관리자 테스트 기록은 빠짐)
+//   /reset     내 테스트 기록 지우기 · /delete 숫자ID  학생 정보 지우기
 //   /help      도움말
 // ═════════════════════════════════════════════════════════════
 import { Bot, InlineKeyboard, Keyboard, InputFile } from "grammy";
@@ -18,6 +19,15 @@ import { tx, langOf, KO } from "./text.js";
 export const bot = new Bot(process.env.BOT_TOKEN || "0:test");
 
 export const ALLOWED_UPDATES = ["message", "callback_query", "chat_join_request", "my_chat_member"];
+
+// 같은 메시지를 텔레그램이 다시 보내도 한 번만 처리 (카드 두 장 방지)
+bot.use(async (ctx, next) => {
+  const id = ctx.update.update_id;
+  if (id != null && !(await kv.setNX(`upd:${id}`, 1, 600).catch(() => true))) return;
+  await next();
+  // 10분에 한 번, 들어온 메시지를 처리하는 김에 "이어서 하기" 알림도 확인 (따로 예약 서비스 필요 없음)
+  if (await kv.setNX("remind:lock", 1, 600).catch(() => false)) await runReminders(ctx.api).catch((e) => console.error("알림 실패:", e.message));
+});
 
 // ── 관리자 ──
 const adminIds = () =>
@@ -34,11 +44,19 @@ const K = {
   apps: "apps", // 지원자 id 목록
   channel: "channel", // 봇이 관리자로 있는 채널 { id, title }
   joinlink: "joinlink",
+  pending: "pending", // 입력을 시작했거나 인사만 받은 학생 (아직 다 안 냄)
 };
 const STATE_TTL = 7 * 24 * 3600;
 const getState = (id) => kv.get(K.state(id));
-const setState = (id, s) => kv.set(K.state(id), s, STATE_TTL);
-const clearState = (id) => kv.del(K.state(id));
+const setState = async (id, s) => {
+  s.at = Date.now(); // 마지막으로 진행한 시각 (이어서 하기 알림 기준)
+  await kv.set(K.state(id), s, STATE_TTL);
+  await kv.sadd(K.pending, id);
+};
+const clearState = async (id) => {
+  await kv.del(K.state(id));
+  await kv.srem(K.pending, id);
+};
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const nowKST = (ts = Date.now()) =>
@@ -50,6 +68,7 @@ const html = { parse_mode: "HTML" };
 
 // 인사 + 동의 버튼
 async function sendGreet(api, chatId, from, lang) {
+  await setState(from.id, { step: "greet", lang, mode: "full", data: {}, chat: chatId, nudged: 0 });
   await api.sendMessage(chatId, tx(lang, "greet").replace("{name}", esc(from.first_name ?? "")), {
     ...html,
     reply_markup: new InlineKeyboard().text(tx(lang, "btnStart"), "c:go"),
@@ -65,6 +84,8 @@ async function ask(ctx, st) {
     return kb;
   };
   switch (st.step) {
+    case "greet":
+      return sendGreet(ctx.api, ctx.chat.id, ctx.from, lang);
     case "name":
       return ctx.reply(tx(lang, "name"), { ...html, reply_markup: { remove_keyboard: true } });
     case "age":
@@ -99,7 +120,7 @@ const daysKeyboard = (lang, picked) => {
 };
 
 async function startFlow(ctx, lang) {
-  const st = { step: "name", lang, mode: "full", data: {} };
+  const st = { step: "name", lang, mode: "full", data: {}, chat: ctx.chat.id, nudged: 0 };
   await setState(ctx.from.id, st);
   return ask(ctx, st);
 }
@@ -176,12 +197,13 @@ async function finish(ctx, st) {
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,
     status: prev ? prev.status ?? "new" : "new",
+    test: isAdmin(id), // 관리자가 직접 해본 기록 → 엑셀에서 빠짐
   };
   await kv.set(K.app(id), app);
   await kv.sadd(K.apps, id);
   await clearState(id);
   await ctx.reply(tx(st.lang, "done"), { reply_markup: { remove_keyboard: true } });
-  return notifyAdmins(ctx.api, app, prev ? "✏️ 정보 수정" : "🆕 새 지원자");
+  return notifyAdmins(ctx.api, app, `${app.test ? "🧪 테스트 · " : ""}${prev ? "✏️ 정보 수정" : "🆕 새 지원자"}`);
 }
 
 // ═════════════ 관리자 카드 ═════════════
@@ -304,7 +326,9 @@ const HELP = [
   "/joinlink — 채널 환영 링크 (이 링크로 들어오면 봇이 인사 + 정보 받기)",
   "/pinpost — 채널에 [정보 남기기] 버튼 글 올리고 고정 (이미 있는 학생용)",
   "/export — 지원자 전체 엑셀(CSV)",
-  "/start test — 학생 화면 직접 해보기",
+  "/start test — 학생 화면 직접 해보기 (기록은 🧪 테스트로 표시, 엑셀에서 빠짐)",
+  "/reset — 내 테스트 기록 지우기",
+  "/delete 숫자ID — 학생 정보 지우기 (학생이 삭제를 요청할 때, 숫자ID는 엑셀 맨 오른쪽 칸)",
   "",
   "새 지원자가 정보를 다 내면 이 대화로 카드가 와요.",
   "카드의 [🟡 연락함] [🟢 소개함] [⚫ 종결] 로 진행 상태를 표시하세요.",
@@ -335,6 +359,7 @@ admin.command("joinlink", async (ctx) => {
       "이 링크로 들어오면 [가입 요청] → 봇이 1:1로 인사 + 정보 받기 → 바로 승인돼요.",
       "학생들에게 친구 초대할 때 이 링크를 쓰게 해주세요.",
       "⚠️ 예전 일반 링크로 들어온 사람에게는 봇이 먼저 말을 걸 수 없어요.",
+      "   그룹 설정 → 초대 링크 에서 예전 링크는 취소(Revoke)해 주세요.",
     ].join("\n"),
     { ...html, link_preview_options: { is_disabled: true } }
   );
@@ -355,9 +380,27 @@ admin.command("pinpost", async (ctx) => {
   }
 });
 
+admin.command("reset", async (ctx) => {
+  await kv.del(K.app(ctx.from.id));
+  await kv.srem(K.apps, ctx.from.id);
+  await clearState(ctx.from.id);
+  return ctx.reply("🧹 내 테스트 기록을 지웠어요. /start test 로 처음부터 다시 해볼 수 있어요.");
+});
+
+admin.command("delete", async (ctx) => {
+  const id = Number(String(ctx.match ?? "").replace(/\D/g, ""));
+  if (!id) return ctx.reply("사용법: /delete 숫자ID\n숫자ID는 /export 엑셀 맨 오른쪽 '텔레그램 번호' 칸에 있어요.");
+  const app = await kv.get(K.app(id));
+  if (!app) return ctx.reply("그 번호의 학생 정보가 없어요.");
+  await kv.del(K.app(id));
+  await kv.srem(K.apps, id);
+  await clearState(id);
+  return ctx.reply(`🗑 ${esc(app.name)} 학생 정보를 지웠어요.`, html);
+});
+
 admin.command("export", async (ctx) => {
   const ids = (await kv.smembers(K.apps)) ?? [];
-  const apps = (await kv.mget(ids.map(K.app))).filter(Boolean).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const apps = (await kv.mget(ids.map(K.app))).filter((a) => a && !a.test && !isAdmin(a.id)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   if (!apps.length) return ctx.reply("아직 지원자가 없어요.");
   const cell = (v) => {
     const s = v == null ? "" : String(v);
@@ -392,6 +435,16 @@ bot.callbackQuery("c:go", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
   return startFlow(ctx, langOf(ctx.from.language_code));
+});
+
+// 이어서 하기 (알림 버튼)
+bot.callbackQuery("c:resume", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  const st = await getState(ctx.from.id);
+  if (!st) return;
+  if (st.step === "greet") return startFlow(ctx, st.lang);
+  return ask(ctx, st);
 });
 
 bot.callbackQuery(/^c:(topik|ielts|car):(\d)$/, async (ctx) => {
@@ -491,5 +544,37 @@ pm.on("message", async (ctx) => {
   }
   return ctx.reply(tx(lang, "msgSent"));
 });
+
+// ═════════════ ⏰ 이어서 하기 알림 ═════════════
+//  입력을 시작했거나 인사만 받고 멈춘 학생 → 1시간 뒤 1번 + 다음 날 1번 (최대 2번)
+//  한국 시간 10~21시에만 보냄. 2일 지나면 포기.
+const HOUR = 3600 * 1000;
+const hourKST = () => Number(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul", hour: "numeric", hourCycle: "h23" }));
+
+export async function runReminders(api) {
+  const h = hourKST();
+  if (h < 10 || h >= 22) return 0;
+  let sent = 0;
+  for (const id of (await kv.smembers(K.pending)) ?? []) {
+    const st = await kv.get(K.state(id));
+    if (!st) { await kv.srem(K.pending, id); continue; }
+    if (st.mode === "days") continue; // 새 학기 요일 질문은 알림 안 함
+    const age = Date.now() - (st.at ?? 0);
+    if (age > 48 * HOUR) { await clearState(id); continue; }
+    const nudged = st.nudged ?? 0;
+    const due = (nudged === 0 && age > HOUR) || (nudged === 1 && age > 23 * HOUR);
+    if (!due) continue;
+    await kv.set(K.state(id), { ...st, nudged: nudged + 1 }, STATE_TTL); // 먼저 표시 (두 번 안 가게)
+    const ok = await api
+      .sendMessage(st.chat ?? id, tx(st.lang, "remind"), {
+        reply_markup: new InlineKeyboard().text(tx(st.lang, "btnContinue"), "c:resume"),
+      })
+      .then(() => true)
+      .catch(() => false); // 봇을 차단한 학생 등
+    if (ok) sent++;
+    if (nudged + 1 >= 2) await kv.srem(K.pending, id); // 2번 보냈으면 끝 (입력 기록은 남겨 둠)
+  }
+  return sent;
+}
 
 bot.catch((err) => console.error("봇 에러:", err.error));

@@ -8,7 +8,7 @@
 export const TEXT = {
   uz: {
     greet:
-      "Assalomu alaykum, {name}! 👋\nGIEC JOB ga xush kelibsiz.\n\nSizga mos ish topishimiz uchun 8 ta qisqa savolga javob bering — 1 daqiqa vaqt oladi ⏱\n\n<i>Ma'lumotlaringiz faqat ish taklif qilish uchun ishlatiladi.</i>",
+      "Assalomu alaykum, {name}! 👋\nGIEC JOB ga xush kelibsiz.\n\nSizga mos ishni topishimiz uchun 8 ta qisqa savolga javob bering — bor-yo'g'i 1 daqiqa ⏱\n\n<i>Ma'lumotlaringiz faqat ish taklif qilish uchun ishlatiladi.</i>",
     btnStart: "✅ Roziman, boshladik",
     name: "<b>1/8</b> · Ism va familiyangizni pasportdagidek lotin harflarida yozing\n\nMasalan: <code>ALIEV JASUR</code>",
     nameBad: "Ism va familiyangizni lotin harflarida yozing. Masalan: ALIEV JASUR",
@@ -35,6 +35,8 @@ export const TEXT = {
     already: "Siz allaqachon ma'lumot qoldirgansiz ✅\nMenejerimiz siz bilan bog'lanadi.\n\nMa'lumotlaringiz o'zgargan bo'lsa, pastdagi tugmani bosing 👇",
     btnUpdate: "✏️ Ma'lumotlarni yangilash",
     msgSent: "Xabaringiz menejerga yuborildi ✅",
+    remind: "Ma'lumotlaringiz hali to'liq emas 🙂\nOz qoldi — pastdagi tugmani bosib davom ettiring 👇",
+    btnContinue: "▶️ Davom etish",
     pinPost: "💼 <b>Ish kerakmi?</b>\n\nBotga ma'lumotlaringizni qoldiring — menejerimiz siz bilan bog'lanadi.\nBor-yo'g'i 1 daqiqa ⏱\n\n👇 Pastdagi tugmani bosing",
     btnPin: "📝 Ma'lumot qoldirish",
   },
@@ -67,6 +69,8 @@ export const TEXT = {
     already: "Вы уже оставили данные ✅\nМенеджер свяжется с вами.\n\nЕсли данные изменились, нажмите кнопку ниже 👇",
     btnUpdate: "✏️ Обновить данные",
     msgSent: "Ваше сообщение отправлено менеджеру ✅",
+    remind: "Вы не закончили заполнение 🙂\nОсталось немного — нажмите кнопку ниже 👇",
+    btnContinue: "▶️ Продолжить",
     pinPost: "",
     btnPin: "",
   },
