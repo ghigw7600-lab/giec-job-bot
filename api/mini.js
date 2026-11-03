@@ -21,6 +21,9 @@ import {
   createJobRecord,
   todayISO,
   jobMeta,
+  addNoShow,
+  removeManualNoShow,
+  cancelAsNoShow,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -66,6 +69,7 @@ const studentView = (a) => ({
   car: a.car === 0,
   days: (a.days ?? []).map((i) => KO.days[i]),
   status: a.status ?? "new",
+  guest: !!a.guest,
   lang: langName(a.lang),
   tgName: a.tgName,
   username: a.username ?? null,
@@ -143,6 +147,19 @@ const ADMIN = {
   },
   async unapply({ id, uid }) {
     return unapplyJob(bot.api, id, uid, await botName());
+  },
+  // 🚫 직전 취소 = 빵꾸 + 자리 다시 열기
+  async nocancel({ id, uid }) {
+    return cancelAsNoShow(bot.api, id, uid, await botName());
+  },
+  // ❌ 빵꾸 직접 추가 / 지우기 (학생 카드)
+  async noshow({ uid, note }) {
+    await addNoShow(uid, note, this.who);
+    return { ok: true };
+  },
+  async noshowDel({ uid, at }) {
+    await removeManualNoShow(uid, at);
+    return { ok: true };
   },
   async close({ id }) {
     const job = await kv.get(`job:${id}`);

@@ -238,6 +238,7 @@ async function finish(ctx, st) {
     statusBy: null,
     statusAt: null,
     test: isAdmin(id), // 관리자가 직접 해본 기록 → 엑셀에서 빠짐
+    guest: false, // 정보 없이 지원했던 학생이 정보를 내면 일반 학생으로
   };
   await clearState(id);
   await ctx.reply(tx(st.lang, "done"), { reply_markup: { remove_keyboard: true } });
@@ -903,7 +904,7 @@ export async function findStudents(f) {
   const day = f.off == null ? null : dayOf(f.off);
   const ids = (await kv.smembers(K.apps)) ?? [];
   return (await kv.mget(ids.map(K.app)))
-    .filter((a) => a && !a.test && !isAdmin(a.id) && a.status !== "closed")
+    .filter((a) => a && !a.test && !a.guest && !isAdmin(a.id) && a.status !== "closed")
     .filter((a) => freeOn(a, day) && (a.topik ?? 0) >= f.topik && (!f.car || a.car === 0) && (f.gender == null || a.gender === f.gender))
     .filter((a) => !f.noFlaky || (a.workNo ?? 0) < 2)
     .sort(
@@ -1289,7 +1290,10 @@ export async function applyJob(api, from, jobId) {
           ...html,
           link_preview_options: { is_disabled: true },
           reply_markup: (() => {
-            const kb = new InlineKeyboard().text("↩️ 이 지원 취소 (자리 다시 열기)", `a:unapply:${jobId}:${from.id}`);
+            const kb = new InlineKeyboard()
+              .text("🚫 직전 취소 = 빵꾸", `a:nocancel:${jobId}:${from.id}`)
+              .row()
+              .text("↩️ 그냥 지원 취소 (자리 다시 열기)", `a:unapply:${jobId}:${from.id}`);
             if (adminAppUrl()) kb.row().webApp("📋 관리 화면에서 보기", adminAppUrl(`job=${jobId}`));
             return kb;
           })(),
@@ -1332,6 +1336,15 @@ bot.callbackQuery(/^a:unapply:(\d+):(\d+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
 });
 
+bot.callbackQuery(/^a:nocancel:(\d+):(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const [, jobId, uid] = ctx.match;
+  const r = await cancelAsNoShow(ctx.api, jobId, uid, ctx.me.username);
+  if (!r.ok) return ctx.answerCallbackQuery({ text: r.error, show_alert: true });
+  await ctx.answerCallbackQuery({ text: `🚫 빵꾸로 기록하고 취소했어요${r.left != null ? ` — 남은 인원 ${r.left}명` : ""}`, show_alert: true });
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+});
+
 // ═════════════ ✅ 출근 / ❌ 빵꾸 기록 ═════════════
 //  일한 날 저녁 8시쯤 관리자에게 공고별로 묻기 → [✅ 모두 출근] 한 번 또는 빵꾸만 표시
 //  답이 없으면 다음 날 아침 한 번 더. 학생에게는 아무것도 안 감
@@ -1352,7 +1365,13 @@ export async function setAttendance(jobId, uid, r) {
   if (r) job.att[uid] = r;
   else delete job.att[uid];
   await kv.set(`job:${jobId}`, job, JOB_TTL);
-  const app = await kv.get(K.app(uid));
+  let app = await kv.get(K.app(uid));
+  if (!app && r) {
+    // 정보 없이 지원한 학생(일당·단기)도 출근·빵꾸 기록은 남김 — 이름·@아이디만 있는 가벼운 기록 (guest)
+    const j = await kv.get(K.jobApp(jobId, uid));
+    app = { id: Number(uid), guest: true, name: j?.name ?? `#${uid}`, tgName: j?.name ?? null, username: j?.username ?? null, status: "new", createdAt: Date.now(), updatedAt: Date.now() };
+    await kv.sadd(K.apps, app.id);
+  }
   if (app) {
     app.workOk = (app.workOk ?? 0) + (r === "ok" ? 1 : 0) - (prev === "ok" ? 1 : 0);
     app.workNo = (app.workNo ?? 0) + (r === "no" ? 1 : 0) - (prev === "no" ? 1 : 0);
@@ -1362,6 +1381,43 @@ export async function setAttendance(jobId, uid, r) {
     await kv.set(K.app(uid), app);
   }
   return job;
+}
+
+// ❌ 빵꾸 직접 추가 (공고와 상관없이 — 예: 전화로 갑자기 취소) / 마지막 직접 기록 지우기
+export async function addNoShow(uid, note, by) {
+  const app = await kv.get(K.app(uid));
+  if (!app) throw new Error("학생을 찾을 수 없어요");
+  app.workNo = (app.workNo ?? 0) + 1;
+  app.hist = [{ job: null, date: todayISO(), r: "no", title: String(note ?? "").trim().slice(0, 60) || "직접 추가", by, manual: Date.now() }, ...(app.hist ?? [])].slice(0, 30);
+  await kv.set(K.app(uid), app);
+  return app;
+}
+export async function removeManualNoShow(uid, at) {
+  const app = await kv.get(K.app(uid));
+  if (!app) throw new Error("학생을 찾을 수 없어요");
+  const i = (app.hist ?? []).findIndex((h) => h.manual === Number(at));
+  if (i < 0) throw new Error("이미 지웠어요");
+  app.hist.splice(i, 1);
+  app.workNo = Math.max(0, (app.workNo ?? 0) - 1);
+  await kv.set(K.app(uid), app);
+  return app;
+}
+// 🚫 직전 취소 = ❌ 빵꾸로 기록 + 지원 취소(자리 다시 열기)
+export async function cancelAsNoShow(api, jobId, uid, username) {
+  // 지원 취소 먼저 (취소하면 그 공고 출근 기록이 지워지므로), 그다음 학생 기록에 빵꾸 1회
+  const job = await kv.get(`job:${jobId}`);
+  const j = await kv.get(K.jobApp(jobId, uid));
+  const left = await unapplyJob(api, jobId, uid, username);
+  let app = await kv.get(K.app(uid));
+  if (!app) {
+    app = { id: Number(uid), guest: true, name: j?.name ?? `#${uid}`, tgName: j?.name ?? null, username: j?.username ?? username ?? null, status: "new", createdAt: Date.now(), updatedAt: Date.now() };
+    await kv.sadd(K.apps, app.id);
+  }
+  app.workNo = (app.workNo ?? 0) + 1;
+  const title = "직전 취소 · " + (job?.text ?? job?.caption ?? "").split("\n")[0].slice(0, 34);
+  app.hist = [{ job: null, date: job?.date ?? todayISO(), r: "no", title, manual: Date.now() }, ...(app.hist ?? [])].slice(0, 30);
+  await kv.set(K.app(uid), app);
+  return left;
 }
 
 const attText = (job, apps) =>

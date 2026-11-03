@@ -173,7 +173,7 @@ async function renderJob(id) {
         <div class="row">
           <div class="sp">
             <div class="title">${badge(a)} ${esc(a.name)} <span class="muted">${a.gender ?? ""} ${a.age ?? ""}세</span></div>
-            <div class="muted">${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}${a.car ? " · 🚗" : ""}</div>
+            <div class="muted">${a.guest || !a.school ? `정보 없이 지원 (일당·단기)${a.username ? ` · @${esc(a.username)}` : ""}` : `${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}${a.car ? " · 🚗" : ""}`}</div>
             <div class="muted">출근 ${a.workOk} · 빵꾸 ${a.workNo} · ${ago(a.appliedAt)} 지원</div>
           </div>
           <button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}" title="출근">✅</button>
@@ -182,7 +182,8 @@ async function renderJob(id) {
         <div class="btns">
           <button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>
           ${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}
-          <button class="btn red sm" data-unapply="${a.id}">↩️ 지원 취소</button>
+          <button class="btn red sm" data-nocancel="${a.id}">🚫 직전 취소 = 빵꾸</button>
+          <button class="btn ghost sm" data-unapply="${a.id}">↩️ 그냥 취소</button>
         </div>
       </div>`).join("") : `<div class="empty">아직 지원자가 없어요</div>`}`;
   const act = async (fn, msg) => { try { haptic(); await fn(); toast(msg); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); } };
@@ -198,6 +199,10 @@ async function renderJob(id) {
     $("#rsGo").onclick = () => act(async () => { const r = await api("repost", { id, slots: $("#rs").value || null }); location.hash = `job=${r.id}`; }, "📢 맨 아래에 다시 올렸어요");
   };
   document.querySelectorAll("[data-att]").forEach((b) => (b.onclick = () => { const cur = b.classList.contains("on"); act(() => api("att", { id, uid: b.dataset.uid, r: cur ? null : b.dataset.att }), cur ? "지웠어요" : b.dataset.att === "ok" ? "✅ 출근" : "❌ 빵꾸"); }));
+  document.querySelectorAll("[data-nocancel]").forEach((b) => (b.onclick = () => {
+    const go = () => act(() => api("nocancel", { id, uid: b.dataset.nocancel }), "🚫 빵꾸로 기록하고 자리를 다시 열었어요");
+    tg?.showConfirm ? tg.showConfirm("직전 취소로 빵꾸 1번을 기록하고, 지원을 취소해 자리를 다시 열까요?", (ok) => ok && go()) : go();
+  }));
   document.querySelectorAll("[data-unapply]").forEach((b) => (b.onclick = () => (tg?.showConfirm ? tg.showConfirm("이 지원을 취소하고 자리를 다시 열까요?", (ok) => ok && act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요")) : act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요"))));
   document.querySelectorAll("[data-stu]").forEach((b) => (b.onclick = () => (location.hash = `stu=${b.dataset.stu}`)));
   document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => tg?.openTelegramLink(`https://t.me/${b.dataset.chat}`)));
@@ -249,7 +254,11 @@ function renderStudent(id) {
     </div>
     <div class="card">
       <b>📈 일한 기록</b> <span class="muted">출근 ${s.workOk} · 빵꾸 ${s.workNo}</span>
-      ${s.hist.length ? s.hist.map((h) => `<div class="hist">${h.r === "ok" ? "✅" : "❌"} ${esc(h.date)} · <a href="#job=${h.job}">#${h.job}</a> ${esc(h.title ?? "")}</div>`).join("") : `<div class="muted" style="margin-top:6px">아직 기록이 없어요</div>`}
+      ${s.hist.length ? s.hist.map((h) => `<div class="hist">${h.r === "ok" ? "✅" : "❌"} ${esc(h.date)} · ${h.job ? `<a href="#job=${h.job}">#${h.job}</a>` : "직접"} ${esc(h.title ?? "")}${h.manual ? ` <a href="#" data-delns="${h.manual}" class="muted">지우기</a>` : ""}</div>`).join("") : `<div class="muted" style="margin-top:6px">아직 기록이 없어요</div>`}
+      <div class="row" style="margin-top:10px;gap:6px">
+        <input id="nsNote" placeholder="빵꾸 사유 (예: 당일 아침 취소)" style="flex:1">
+        <button class="btn red sm" id="addNs">❌ 빵꾸 추가</button>
+      </div>
     </div>
     <div class="card">
       <b>📝 메모</b> <span class="muted">(혜승·관리자만 봐요)</span>
@@ -259,6 +268,13 @@ function renderStudent(id) {
     <div class="muted" style="padding:0 4px">등록 ${new Date(s.createdAt).toLocaleDateString("ko-KR")} · 최근 ${ago(s.updatedAt)}</div>`;
   $("#chat") && ($("#chat").onclick = (e) => { e.preventDefault(); tg?.openTelegramLink(`https://t.me/${s.username}`); });
   document.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { try { haptic(); await api("status", { uid: s.id, status: b.dataset.st }); s.status = b.dataset.st; toast(`${STATUS[s.status]}로 바꿨어요`); renderStudent(id); } catch (e) { toast("⚠️ " + e.message); } }));
+  $("#addNs").onclick = async () => {
+    try { haptic(); await api("noshow", { uid: s.id, note: $("#nsNote").value }); toast("❌ 빵꾸 1번 추가했어요"); await load(); renderStudent(id); } catch (e) { toast("⚠️ " + e.message); }
+  };
+  document.querySelectorAll("[data-delns]").forEach((b) => (b.onclick = async (e) => {
+    e.preventDefault();
+    try { await api("noshowDel", { uid: s.id, at: b.dataset.delns }); toast("지웠어요"); await load(); renderStudent(id); } catch (err) { toast("⚠️ " + err.message); }
+  }));
   $("#saveNote").onclick = async () => { try { await api("note", { uid: s.id, note: $("#note").value }); s.note = $("#note").value; toast("💾 저장했어요"); } catch (e) { toast("⚠️ " + e.message); } };
 }
 
