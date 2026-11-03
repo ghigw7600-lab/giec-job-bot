@@ -402,6 +402,7 @@ const pm = bot.filter((ctx) => ctx.chat?.type === "private");
 pm.command("start", async (ctx) => {
   const lang = await getLang(ctx.from);
   const payload = String(ctx.match ?? "");
+  if (payload === "ref") return sendReferral(ctx, lang); // 🤝 친구 소개 링크 (관리자도 확인용으로 받음)
   if (isAdmin(ctx.from.id) && !payload.startsWith("test") && !payload.startsWith("job_")) return ctx.reply(HELP, html);
   await clearState(ctx.from.id);
   const app = await kv.get(K.app(ctx.from.id));
@@ -422,12 +423,31 @@ pm.command("start", async (ctx) => {
   return sendGreet(ctx.api, ctx.chat.id, ctx.from, lang);
 });
 
+// ═════════════ 🤝 친구 소개 이벤트 ═════════════
+//   학생마다 GIECbot 개인 소개 링크: t.me/GIECbot?start=go-fr<텔레그램번호 36진수>
+//   친구가 이 링크로 GIECbot 상담신청 → GIEC 직접 상담방(대표)으로, 추천인 = 이 학생 (GIECbot이 jobbot:app 기록에서 이름을 읽음)
+const GIECBOT = () => process.env.GIECBOT_USERNAME || "GIECbot";
+export const referralLink = (id) => `https://t.me/${GIECBOT()}?start=go-fr${Number(id).toString(36)}`;
+async function sendReferral(ctx, lang) {
+  const link = referralLink(ctx.from.id);
+  await kv.sadd("referrers", ctx.from.id); // 링크를 받아 간 학생 (나중에 집계용)
+  const share = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(tx(lang, "refShare"))}`;
+  return ctx.reply(tx(lang, "refIntro").replace("{link}", link), {
+    ...html,
+    reply_markup: new InlineKeyboard().url(tx(lang, "refBtn"), share),
+    link_preview_options: { is_disabled: true },
+  });
+}
+// 학생 누구나 /ref 로도 받을 수 있음
+pm.command("ref", async (ctx) => sendReferral(ctx, await getLang(ctx.from)));
+
 // ── 관리자 명령어 ──
 const HELP = [
   "🛠 <b>GIEC JOB 관리자 메뉴</b>",
   "",
   "/joinlink — 채널 환영 링크 (이 링크로 들어오면 봇이 인사 + 정보 받기)",
   "/pinpost — 채널에 [정보 남기기] 버튼 글 올리고 고정 (이미 있는 학생용)",
+  "/refpost — 🤝 친구 소개 이벤트 포스터를 채널에 올리기 ([🎓 유학 상담] [🔗 내 소개 링크] 버튼이 붙음)",
   "/jobs — 🛠 관리 화면 (공고별 지원자·마감·다시 올리기·출근 기록 / 학생 표 / 현황) — 입력창 왼쪽 [🛠 관리] 버튼과 같아요",
   "/find — 공고 올리기: 🚨 긴급(오늘·내일) / 📅 일반(5일 안) → 학생 찾기 → 그룹방·1:1로 보내기 → 🔒 마감",
   "/export — 지원자 전체 엑셀(CSV)",
@@ -529,6 +549,64 @@ admin.command("pinpost", async (ctx) => {
   return ctx.reply(
     `✅ 그룹에 고정글을 올렸어요 (봇 신청 버튼 + 친구 초대 링크·공유 버튼).${descOk ? "\n✅ 그룹 소개글에도 봇과 초대 링크를 넣었어요." : "\n⚠️ 그룹 소개글은 못 바꿨어요 (봇의 '그룹 정보 수정' 권한 확인)."}`
   );
+});
+
+// /refpost : 🤝 친구 소개 이벤트 포스터 → 채널 (버튼 2개)
+//   [🎓 유학 상담] = GIECbot 직접 상담 (추천인 없음, 채널 학생 본인용)
+//   [🔗 내 소개 링크] = 이 봇이 학생마다 GIECbot 개인 소개 링크를 줌 → 친구에게 보내기
+//  쓰는 법: /refpost → 포스터 사진(+설명 글)을 보냄 → 미리보기 → [✅ 채널에 올리기]
+//          (사진 설명 칸에 /refpost 를 쓰고 바로 보내도 됨)
+const refKey = (id) => `refpost:${id}`;
+const refKeyboard = (botName) =>
+  new InlineKeyboard()
+    .url("🎓 Koreyada o'qish · Учёба в Корее", `https://t.me/${GIECBOT()}?start=go-fr`)
+    .row()
+    .url("🔗 Taklif havolam · Моя ссылка", `https://t.me/${botName}?start=ref`);
+const isPoster = (m) => !!(m.photo || m.document || m.video || m.animation);
+async function refPreview(ctx, m, caption) {
+  await kv.set(refKey(ctx.from.id), { step: "ready", from: ctx.chat.id, msgId: m.message_id, caption }, 24 * 3600);
+  await ctx.api.copyMessage(ctx.chat.id, ctx.chat.id, m.message_id, {
+    reply_markup: refKeyboard(ctx.me.username),
+    ...(caption != null ? { caption } : {}),
+  });
+  return ctx.reply("👆 미리보기예요. 이대로 채널에 올릴까요?", {
+    reply_markup: new InlineKeyboard().text("✅ 채널에 올리기", "rp:ok").text("❌ 취소", "rp:no"),
+  });
+}
+admin.command("refpost", async (ctx) => {
+  const m = ctx.message;
+  if (isPoster(m)) return refPreview(ctx, m, (m.caption ?? "").replace(/^\/refpost(@\w+)?\s*/i, ""));
+  await kv.set(refKey(ctx.from.id), { step: "wait" }, 3600);
+  return ctx.reply("🤝 친구 소개 포스터를 보내 주세요 (사진, 설명 글은 사진 아래 칸에).\n그만두려면 /cancel");
+});
+admin.on("message", async (ctx, next) => {
+  const r = await kv.get(refKey(ctx.from.id));
+  if (r?.step !== "wait" || ctx.message.text?.startsWith("/")) return next();
+  if (!isPoster(ctx.message)) return ctx.reply("포스터 사진으로 보내 주세요. 그만두려면 /cancel");
+  return refPreview(ctx, ctx.message, null);
+});
+bot.callbackQuery(/^rp:(ok|no)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const r = await kv.get(refKey(ctx.from.id));
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  if (ctx.match[1] === "no" || r?.step !== "ready") {
+    await kv.del(refKey(ctx.from.id));
+    return ctx.answerCallbackQuery({ text: "취소했어요" });
+  }
+  const ch = await kv.get(K.channel);
+  if (!ch) return ctx.answerCallbackQuery({ text: "⚠️ 채널을 아직 몰라요 (/joinlink 안내)", show_alert: true });
+  await ctx.answerCallbackQuery();
+  try {
+    const sent = await ctx.api.copyMessage(ch.id, r.from, r.msgId, {
+      reply_markup: refKeyboard(ctx.me.username),
+      ...(r.caption != null ? { caption: r.caption } : {}),
+    });
+    await kv.del(refKey(ctx.from.id));
+    const link = ch.username ? `https://t.me/${ch.username}/${sent.message_id}` : `https://t.me/c/${String(ch.id).replace(/^-100/, "")}/${sent.message_id}`;
+    return ctx.reply(`✅ 「${esc(ch.title ?? "채널")}」에 올렸어요.\n${link}`, { ...html, link_preview_options: { is_disabled: true } });
+  } catch (e) {
+    return ctx.reply(`⚠️ 못 올렸어요: ${e.description ?? e.message}`);
+  }
 });
 
 admin.command("reset", async (ctx) => {
@@ -865,6 +943,7 @@ bot.callbackQuery(/^p:new:(g|d|b)$/, async (ctx) => {
 
 admin.command("cancel", async (ctx) => {
   await kv.del(postKey(ctx.from.id));
+  await kv.del(refKey(ctx.from.id));
   return ctx.reply("취소했어요.");
 });
 

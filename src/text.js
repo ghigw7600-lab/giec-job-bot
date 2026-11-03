@@ -102,9 +102,10 @@ export const TEXT = {
   },
 };
 
-import { MORE, LANGS, BOARD } from "./text-more.js";
+import { MORE, LANGS, BOARD, REFER } from "./text-more.js";
 Object.assign(TEXT, MORE);
 for (const [l, strings] of Object.entries(BOARD)) TEXT[l] = { ...(TEXT[l] ?? {}), ...strings };
+for (const [l, strings] of Object.entries(REFER)) TEXT[l] = { ...(TEXT[l] ?? {}), ...strings };
 export { LANGS };
 
 // 텔레그램 앱 언어 → 봇 언어 (학생이 [🌐] 버튼으로 바꾸면 그게 우선 — bot.js getLang)

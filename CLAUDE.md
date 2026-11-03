@@ -7,3 +7,4 @@
 - 토큰·비밀값은 저장소에 넣지 않음 (.env 는 .gitignore).
 - GIEC 상담 봇(giec-telegram-bot)과 별개. 저장소 키 앞자리 jobbot: 으로 구분.
 - 그룹 참여·퇴장 알림은 봇이 지움(기본). 그룹에 새 멤버 이름 부르는 인사는 끔(대표·혜승 결정, GROUP_HELLO=1이면 켜짐).
+- 🤝 친구 소개 이벤트: /refpost(포스터 → 채널, 버튼 [🎓 유학 상담 → GIECbot go-fr] [🔗 내 소개 링크 → ?start=ref]), 학생 /ref 또는 ?start=ref → GIECbot 개인 소개 링크(go-fr<번호 36진수>) + 공유 버튼. 친구 소개 학생은 GIECbot의 대표 직접 상담방으로 (칸 모름).
