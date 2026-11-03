@@ -809,7 +809,16 @@ const TOPIK_MIN = [["상관없음", 0], ["1급↑", 1], ["3급↑", 2], ["4급�
 const topikName = (v) => TOPIK_MIN.find((t) => t[1] === v)?.[0] ?? "상관없음";
 const mark = (on, label) => (on ? `✅ ${label}` : label);
 
-const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null });
+const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null, start: null, hours: null, wage: null });
+// 🕘 근무 시간 · 💰 시급 버튼 (2026-11-03 혜승 요청) — 고르면 공고 위에 봇이 한 줄씩 붙임
+const STARTS = [6, 7, 8, 9, 10, 13, 18, 22];
+const HOURS = [4, 5, 6, 8, 9, 10];
+const WAGES = [10320, 11000, 12000, 13000, 15000]; // 10,320 = 2026년 최저시급
+const hh = (h) => `${String(h % 24).padStart(2, "0")}:00`;
+export const timeLabel = (j) => (j.start == null ? null : j.hours ? `${hh(j.start)}–${hh(j.start + j.hours)} (${j.hours}h)` : `${hh(j.start)}~`);
+export const wageLabel = (j) => (j.wage ? `${Number(j.wage).toLocaleString("en-US")}₩ / 1h` : null);
+// 공고 위 한 줄씩 (그룹방·1:1·공고판 같이 씀)
+export const jobMeta = (j) => [timeLabel(j) ? `🕘 ${timeLabel(j)}` : null, wageLabel(j) ? `💰 ${wageLabel(j)}` : null].filter(Boolean);
 const GENDER = [["성별 상관없음", null], ["남자만", 0], ["여자만", 1]];
 const genderName = (g) => GENDER.find((x) => x[1] === (g ?? null))[0];
 const findDayLabel = (f) => (f.off == null ? "날짜 상관없음" : `${f.off === 0 ? "오늘 " : f.off === 1 ? "내일 " : ""}${dateLabel(f.off)}`);
@@ -820,6 +829,10 @@ const findText = (f) =>
     `📅 일할 날: <b>${findDayLabel(f)}</b>`,
     `📝 TOPIK: <b>${topikName(f.topik)}</b>`,
     `🚻 성별: <b>${genderName(f.gender)}</b>`,
+    `🕘 근무 시간: <b>${timeLabel(f) ?? "안 고름"}</b>`,
+    `💰 시급: <b>${f.wage ? `${f.wage.toLocaleString("ko-KR")}원` : "안 고름"}</b>`,
+    "",
+    "<i>근무 시간·시급은 고르면 공고 위에 봇이 붙여요 (안 골라도 돼요). 한 번 더 누르면 풀려요.</i>",
   ].join("\n");
 const findKeyboard = (f) => {
   const kb = new InlineKeyboard();
@@ -836,6 +849,12 @@ const findKeyboard = (f) => {
   kb.row();
   GENDER.forEach(([n, v]) => kb.text(mark((f.gender ?? null) === v, n), `f:g:${v ?? "any"}`));
   kb.row().text(mark(!!f.noFlaky, "⚠️ 빵꾸 2번 이상 빼기"), `f:n:${f.noFlaky ? 0 : 1}`);
+  kb.row().text("── 🕘 시작 시간 ──", "f:noop").row();
+  STARTS.forEach((h, i) => { kb.text(mark(f.start === h, hh(h)), `f:s:${h}`); if (i === 3) kb.row(); });
+  kb.row().text("── ⏱ 몇 시간 ──", "f:noop").row();
+  HOURS.forEach((h) => kb.text(mark(f.hours === h, `${h}시간`), `f:h:${h}`));
+  kb.row().text("── 💰 시급 ──", "f:noop").row();
+  WAGES.forEach((w, i) => { kb.text(mark(f.wage === w, w === 10320 ? "10,320 최저" : w.toLocaleString("ko-KR")), `f:w:${w}`); if (i === 2) kb.row(); });
   return kb.row().text("🔎 찾기", "f:go");
 };
 
@@ -859,7 +878,8 @@ bot.callbackQuery(/^f:k:(urgent|normal)$/, async (ctx) => {
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
 
-bot.callbackQuery(/^f:(o|t|c|g|n):(\w+)$/, async (ctx) => {
+bot.callbackQuery("f:noop", (ctx) => ctx.answerCallbackQuery());
+bot.callbackQuery(/^f:(o|t|c|g|n|s|h|w):(\w+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
@@ -869,6 +889,9 @@ bot.callbackQuery(/^f:(o|t|c|g|n):(\w+)$/, async (ctx) => {
   if (k === "c") f.car = v === "1";
   if (k === "g") f.gender = v === "any" ? null : Number(v);
   if (k === "n") f.noFlaky = v === "1";
+  if (k === "s") f.start = f.start === Number(v) ? null : Number(v);
+  if (k === "h") f.hours = f.hours === Number(v) ? null : Number(v);
+  if (k === "w") f.wage = f.wage === Number(v) ? null : Number(v);
   await kv.set(findKey(ctx.from.id), f, FIND_TTL);
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
@@ -899,7 +922,7 @@ bot.callbackQuery("f:go", async (ctx) => {
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
   const list = await findStudents(f);
   await kv.set(findKey(ctx.from.id), { ...f, ids: list.map((a) => a.id) }, FIND_TTL);
-  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)}`;
+  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)}${jobMeta(f).length ? `\n${jobMeta(f).join(" · ")}` : ""}`;
   const lines = list.slice(0, LIST_MAX).map(studentLine);
   if (list.length > LIST_MAX) lines.push(`… 외 ${list.length - LIST_MAX}명`);
   if (f.gender != null) {
@@ -907,7 +930,7 @@ bot.callbackQuery("f:go", async (ctx) => {
     if (unknown) lines.push(`ℹ️ 성별을 입력하기 전에 정보를 낸 학생 ${unknown}명은 빠졌어요 (다시 신청하면 성별을 물어봐요)`);
   }
   return ctx.reply(
-    [head, "", ...(lines.length ? lines : ["(맞는 학생이 없어요 — 그룹방에만 올려도 돼요)"]), "", "🚗 = 차 있음 · 🟢 = 이미 일 소개받은 학생 · ⭐ = 성실(출근 3번↑) · ⚠️ = 빵꾸 2번↑ · 이름을 누르면 대화로 가요."].join("\n"),
+    [head, "", ...(lines.length ? lines : ["(맞는 학생이 없어요 — 그룹방에만 올려도 돼요)"]), "", "🟢 = 이미 일 소개받은 학생 · ⭐ = 성실(출근 3번↑) · ⚠️ = 빵꾸 2번↑ · 이름을 누르면 대화로 가요."].join("\n"),
     { ...html, link_preview_options: { is_disabled: true }, reply_markup: whereKeyboard(list.length) }
   );
 });
@@ -929,9 +952,9 @@ bot.callbackQuery(/^p:new:(g|d|b)$/, async (ctx) => {
     [
       `✍️ <b>${WHERE[ctx.match[1]]}</b> — 공고 내용을 메시지 한 개로 보내주세요 (글, 또는 사진 + 설명)`,
       "지금 그룹방에 올리는 모양 그대로 쓰면 돼요. 예)",
-      "<code>365로지스 / 4명\n단순 하차 업무\n위치 : 일산 설문동 606\n근무시간 : 7시-12시\n시급 : 11,000원</code>",
+      "<code>365로지스 / 4명\n단순 하차 업무\n위치 : 일산 설문동 606</code>",
       "",
-      "날짜와 [🙋 지원하기] 버튼, 우즈벡어·키르기스어 안내는 봇이 붙여요. 그만두려면 /cancel",
+      "날짜·근무 시간·시급(위에서 고른 것), [🙋 지원하기] 버튼, 우즈벡어·키르기스어 안내는 봇이 붙여요. 그만두려면 /cancel",
     ].join("\n"),
     html
   );
@@ -953,6 +976,7 @@ function groupBody(job, closed = false) {
   return [
     closed ? "🔒 <b>마감 · Yopildi · Жабылды</b>" : head,
     jobDate(job) ? `📅 ${jobDate(job)}` : null,
+    ...jobMeta(job),
     "",
     esc(body),
     "",
@@ -965,7 +989,7 @@ function groupBody(job, closed = false) {
 // 1:1용 (학생 언어)
 function dmBody(job, lang) {
   const body = job.text != null ? job.text : job.caption ?? "";
-  return [`${job.kind === "urgent" ? "🚨 " : ""}${tx(lang, "jobHead")}`, jobDate(job) ? `📅 ${jobDate(job)}` : null, "", esc(body), "", tx(lang, "jobFoot")]
+  return [`${job.kind === "urgent" ? "🚨 " : ""}${tx(lang, "jobHead")}`, jobDate(job) ? `📅 ${jobDate(job)}` : null, ...jobMeta(job), "", esc(body), "", tx(lang, "jobFoot")]
     .filter((x) => x !== null)
     .join("\n")
     .replace(/\n{3,}/g, "\n\n");
@@ -998,6 +1022,9 @@ admin.on("message", async (ctx, next) => {
     text: m.text ?? null,
     caption: m.caption ?? "",
     ids: f.ids ?? [],
+    start: f.start ?? null,
+    hours: f.hours ?? null,
+    wage: f.wage ?? null,
     by: fullName(ctx.from),
     at: Date.now(),
   };

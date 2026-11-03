@@ -20,6 +20,7 @@ import {
   findStudents,
   createJobRecord,
   todayISO,
+  jobMeta,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -221,7 +222,7 @@ const STUDENT = {
     for (const j of jobs.slice(0, 50)) {
       const applied = !!(await kv.get(`jobyes:${j.id}:${this.user.id}`));
       const taken = ((await kv.smembers(`jobapps:${j.id}`)) ?? []).length;
-      list.push({ id: j.id, urgent: j.kind === "urgent", dateLabel: j.dateLabel, text: j.text ?? j.caption ?? "", left: j.slots ? Math.max(0, j.slots - taken) : null, applied });
+      list.push({ id: j.id, urgent: j.kind === "urgent", dateLabel: j.dateLabel, text: [...jobMeta(j), j.text ?? j.caption ?? ""].join("\n"), left: j.slots ? Math.max(0, j.slots - taken) : null, applied });
     }
     const t = (k) => tx(lang, k);
     return {
