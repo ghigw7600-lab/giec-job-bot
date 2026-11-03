@@ -816,11 +816,12 @@ const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car
 // 공고 정보 (2026-11-03 혜승 요청: 시급·시작·퇴근·근무 시간·주소는 직접 입력, 점심시간은 버튼)
 //   p.meta = { wage, start, end, hours, lunch, addr } → 공고 위에 한 줄씩 봇이 붙임
 const won = (v) => (/^\d[\d,]*$/.test(String(v).trim()) ? `${Number(String(v).replace(/,/g, "")).toLocaleString("en-US")}₩ / 1h` : String(v).trim());
-const LUNCH = { 30: "🍱 30 min", 60: "🍱 1 h", 0: null };
+const LUNCH = { 30: "30 min", 60: "1 h", 0: null };
 export const jobMeta = (j) => {
   const m = j.meta ?? {};
   const time = m.start || m.end ? `🕘 ${[m.start, m.end].filter(Boolean).join(" – ")}${m.hours ? ` (${m.hours})` : ""}` : m.hours ? `🕘 ${m.hours}` : null;
-  return [time, m.lunch ? LUNCH[m.lunch] : null, m.wage ? `💰 ${won(m.wage)}` : null, m.addr ? `📍 ${m.addr}` : null].filter(Boolean);
+  // 혜승 피드백(11-03): 이모티콘은 급구·일시·지원만, 나머지는 글자로
+  return [time, m.lunch ? `점심 · Tushlik · Обед: ${LUNCH[m.lunch]}` : null, m.wage ? `급여 · Maosh · Оплата: ${won(m.wage)}` : null, m.addr ? `주소 · Manzil · Адрес: ${m.addr}` : null].filter(Boolean);
 };
 // "9:00" "9시" "09:00" "9" "9시 30분" → 하루 중 몇 분 (출근 확인 시각 계산용)
 export function startMinutes(v) {
@@ -1006,10 +1007,10 @@ const jobDate = (job) => (job.off == null ? null : job.dateLabel);
 // 그룹방용 (여러 나라 학생이 같이 봄 → 짧게 3개 언어)
 function groupBody(job, closed = false) {
   const head =
-    job.kind === "urgent" ? "🚨 <b>급구 · Shoshilinch · Срочно</b>" : "📢 <b>일자리 · Ish · Работа</b>";
+    job.kind === "urgent" ? "🚨 <b>급구 · Shoshilinch · Срочно</b>" : "<b>일자리 · Ish · Работа</b>";
   const body = job.text != null ? job.text : job.caption ?? "";
   return [
-    closed ? "🔒 <b>마감 · Yopildi · Жабылды</b>" : head,
+    closed ? "<b>[마감] Yopildi · Жабылды</b>" : head,
     jobDate(job) ? `📅 ${jobDate(job)}` : null,
     ...jobMeta(job),
     "",
