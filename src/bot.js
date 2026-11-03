@@ -68,7 +68,7 @@ const K = {
   app: (id) => `app:${id}`, // 다 낸 지원 정보
   apps: "apps", // 지원자 id 목록
   channel: "channel", // 봇이 관리자로 있는 채널 { id, title }
-  joinlink: "joinlink",
+  joinlink: "joinlink:open", // 승인 없는 보통 링크 (예전 승인 링크는 "joinlink")
   pending: "pending", // 입력을 시작했거나 인사만 받은 학생 (아직 다 안 냄)
   jobs: "jobs", // 공고 번호 목록
   jobApps: (id) => `jobapps:${id}`, // 그 공고 지원자 id 목록
@@ -163,7 +163,7 @@ async function startFlow(ctx, lang) {
   return ask(ctx, st);
 }
 
-const next = { name: "age", age: "gender", gender: "phone", phone: "school", phoneText: "school", school: "topik", topik: "ielts", ielts: "car", car: "days" };
+const next = { name: "age", age: "gender", gender: "phone", phone: "school", phoneText: "school", school: "topik", topik: "days" }; // 2026-11-03: IELTS·자동차는 안 물음 (대표·혜승 결정)
 async function goNext(ctx, st) {
   st.step = next[st.step];
   await setState(ctx.from.id, st);
@@ -285,8 +285,8 @@ export function cardText(app, title) {
     `📞 연락처: ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`,
     `🏫 학교: ${esc(app.school)}`,
     `📝 TOPIK: ${KO.topik[app.topik] ?? "-"}`,
-    `🇬🇧 IELTS: ${KO.ielts[app.ielts] ?? "-"}`,
-    `🚗 자동차: ${KO.car[app.car] ?? "-"}`,
+    ...(app.ielts != null ? [`🇬🇧 IELTS: ${KO.ielts[app.ielts] ?? "-"}`] : []), // 예전 학생만
+    ...(app.car != null ? [`🚗 자동차: ${KO.car[app.car] ?? "-"}`] : []),
     `📅 수업 요일: ${dayText(app.days)}`,
     `💬 텔레그램: ${tg}`,
     ...(workLine(app) ? [workLine(app)] : []),
@@ -322,16 +322,13 @@ async function notifyAdmins(api, app, title) {
 
 // ═════════════ 업데이트 처리 ═════════════
 
-// 채널 가입 요청 → 먼저 1:1 인사, 그다음 승인
+// 채널 가입 요청 (예전 승인 링크) → 바로 승인만 (2026-11-03 혜승 요청: 들어올 때 정보 입력 안 시킴)
+//   정보는 공고의 [🙋 지원하기]를 누를 때 받음. 지금 환영 링크는 승인 없는 보통 링크.
 bot.on("chat_join_request", async (ctx) => {
   const req = ctx.chatJoinRequest;
   const ch = await kv.get(K.channel);
   // 그룹 → 채널로 옮기는 동안 예전 방 가입 요청도 승인 (봇이 관리자인 방이면 모두 GIEC JOB 방)
   if (!ch) await kv.set(K.channel, { id: req.chat.id, title: req.chat.title, type: req.chat.type });
-  const lang = await getLang(req.from);
-  const chatId = req.user_chat_id ?? req.from.id;
-  const app = await kv.get(K.app(req.from.id));
-  if (!app) await sendGreet(ctx.api, chatId, req.from, lang).catch((e) => console.error("인사 실패:", e.description));
   await ctx.api.approveChatJoinRequest(req.chat.id, req.from.id).catch((e) => console.error("승인 실패:", e.description));
 });
 
@@ -480,20 +477,20 @@ admin.command("joinlink", async (ctx) => {
       `👋 <b>환영 링크</b> — ${esc(ch.title)}`,
       `<code>${link}</code>`,
       "",
-      "이 링크로 들어오면 [가입 요청] → 봇이 1:1로 인사 + 정보 받기 → 바로 승인돼요.",
-      "학생들에게 친구 초대할 때 이 링크를 쓰게 해주세요.",
-      "⚠️ 예전 일반 링크로 들어온 사람에게는 봇이 먼저 말을 걸 수 없어요.",
-      "   그룹 설정 → 초대 링크 에서 예전 링크는 취소(Revoke)해 주세요.",
+      "누르면 승인 없이 바로 채널에 들어가요 (정보 입력 없음).",
+      "정보는 학생이 공고의 [🙋 지원하기]나 고정글 [📝 정보 남기기]를 누를 때 받아요.",
+      "예전 승인 링크로 들어오는 요청도 봇이 바로 승인해요.",
     ].join("\n"),
     { ...html, link_preview_options: { is_disabled: true } }
   );
 });
 
-// 환영 링크 (가입 요청 링크) — 없으면 만듦
+// 환영 링크 (승인 없는 보통 초대 링크, 2026-11-03~) — 없으면 만듦
+//   예전 승인 링크와 섞이지 않게 저장 칸 이름을 바꿈 (joinlink → joinlink:open)
 async function getJoinLink(api, ch) {
   let link = await kv.get(K.joinlink);
   if (!link) {
-    const r = await api.createChatInviteLink(ch.id, { name: "GIEC JOB 봇 환영 링크", creates_join_request: true });
+    const r = await api.createChatInviteLink(ch.id, { name: "GIEC JOB 환영 링크" });
     link = r.invite_link;
     await kv.set(K.joinlink, link);
   }
@@ -822,7 +819,6 @@ const findText = (f) =>
     "",
     `📅 일할 날: <b>${findDayLabel(f)}</b>`,
     `📝 TOPIK: <b>${topikName(f.topik)}</b>`,
-    `🚗 차: <b>${f.car ? "있어야 함" : "상관없음"}</b>`,
     `🚻 성별: <b>${genderName(f.gender)}</b>`,
   ].join("\n");
 const findKeyboard = (f) => {
@@ -837,7 +833,7 @@ const findKeyboard = (f) => {
     kb.row().text(mark(f.off == null, "날짜 상관없음"), "f:o:any").row();
   }
   TOPIK_MIN.forEach(([n, v]) => kb.text(mark(f.topik === v, n), `f:t:${v}`));
-  kb.row().text(mark(!f.car, "차 상관없음"), "f:c:0").text(mark(f.car, "차 있어야 함"), "f:c:1").row();
+  kb.row();
   GENDER.forEach(([n, v]) => kb.text(mark((f.gender ?? null) === v, n), `f:g:${v ?? "any"}`));
   kb.row().text(mark(!!f.noFlaky, "⚠️ 빵꾸 2번 이상 빼기"), `f:n:${f.noFlaky ? 0 : 1}`);
   return kb.row().text("🔎 찾기", "f:go");
@@ -903,7 +899,7 @@ bot.callbackQuery("f:go", async (ctx) => {
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
   const list = await findStudents(f);
   await kv.set(findKey(ctx.from.id), { ...f, ids: list.map((a) => a.id) }, FIND_TTL);
-  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · 차 ${f.car ? "있어야 함" : "상관없음"} · ${genderName(f.gender)}`;
+  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)}`;
   const lines = list.slice(0, LIST_MAX).map(studentLine);
   if (list.length > LIST_MAX) lines.push(`… 외 ${list.length - LIST_MAX}명`);
   if (f.gender != null) {
@@ -1207,7 +1203,7 @@ export async function applyJob(api, from, jobId) {
   await kv.sadd(K.jobApps(jobId), from.id);
   await kv.set(K.jobApp(jobId, from.id), { at: Date.now() }, JOB_TTL);
   const who = app
-    ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"} · 차 ${KO.car[app.car] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
+    ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
     : [`👤 <a href="tg://user?id=${from.id}">${esc(fullName(from))}</a>`];
   const first = (job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40);
   for (const a of adminIds()) {

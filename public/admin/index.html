@@ -217,7 +217,7 @@ function renderStudents() {
   const chip = (k, n) => `<button class="chip ${stuF[k] ? "on" : ""}" data-sf="${k}">${n}</button>`;
   $("#view").innerHTML = `
     <input id="q" placeholder="이름 · 학교 · 전화 검색" value="${esc(stuQ)}" style="margin-bottom:10px">
-    <div class="chips">${chip("newOnly", "🆕 신규")}${chip("m", "남")}${chip("f", "여")}${chip("t3", "TOPIK 3급↑")}${chip("car", "🚗 차")}${chip("star", "⭐ 성실")}${chip("flaky", "⚠️ 빵꾸")}</div>
+    <div class="chips">${chip("newOnly", "🆕 신규")}${chip("m", "남")}${chip("f", "여")}${chip("t3", "TOPIK 3급↑")}${chip("star", "⭐ 성실")}${chip("flaky", "⚠️ 빵꾸")}</div>
     <div class="muted" style="margin:0 2px 8px">${list.length}명</div>
     ${list.slice(0, 300).map((s) => `
       <div class="card" data-s="${s.id}">
@@ -241,7 +241,7 @@ function renderStudent(id) {
       <div style="margin-top:10px">
         <div>📞 ${s.phone ? `<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : "한국 번호 없음"}</div>
         <div>🏫 ${esc(s.school)}</div>
-        <div>📝 TOPIK ${esc(s.topik)} · IELTS ${esc(s.ielts)} · 🚗 ${s.car ? "있음" : "없음"}</div>
+        <div>📝 TOPIK ${esc(s.topik)}${s.ielts && s.ielts !== "-" ? ` · IELTS ${esc(s.ielts)}` : ""}${s.car ? " · 🚗 차 있음" : ""}</div>
         <div>📅 수업: ${s.days.length ? s.days.join("·") : "없음"}</div>
         <div>💬 ${esc(s.tgName)}${s.username ? ` · <a href="#" id="chat">@${esc(s.username)}</a>` : ""}</div>
       </div>
@@ -287,7 +287,7 @@ function renderNew() {
         <label class="f">1:1 받을 학생 조건 <span class="muted">(일하는 날 수업 없는 학생만)</span></label>
         <div class="chips">${c("topik", 0, "TOPIK 상관없음")}${c("topik", 1, "1급↑")}${c("topik", 2, "3급↑")}${c("topik", 3, "4급↑")}</div>
         <div class="chips">${c("gender", "", "성별 상관없음")}${c("gender", 0, "남자만")}${c("gender", 1, "여자만")}</div>
-        <div class="chips"><button class="chip ${NEW.car ? "on" : ""}" id="car">🚗 차 있어야 함</button><button class="chip ${NEW.noFlaky ? "on" : ""}" id="nf">⚠️ 빵꾸 2번↑ 빼기</button></div>
+        <div class="chips"><button class="chip ${NEW.noFlaky ? "on" : ""}" id="nf">⚠️ 빵꾸 2번↑ 빼기</button></div>
         <div class="count" id="cnt">맞는 학생 세는 중…</div>` : ""}
       <div class="btns"><button class="btn" id="send" style="flex:1">보내기</button></div>
     </div>`;
