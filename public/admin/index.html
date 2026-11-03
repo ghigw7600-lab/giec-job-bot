@@ -101,7 +101,7 @@ let DATA = null;
 let tab = "jobs";
 let jobFilter = "open";
 let stuQ = "", stuF = {};
-const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: "", noFlaky: false, text: "", slots: "" };
+const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: "", noFlaky: false, text: "", slots: "", noInfo: 1 };
 
 async function load() {
   try { DATA = await api("overview"); } catch (e) { $("#view").innerHTML = `<div class="empty">⚠️ ${esc(e.message)}</div>`; return false; }
@@ -281,7 +281,9 @@ function renderNew() {
       <input id="slots" inputmode="numeric" placeholder="${slotsAuto ?? "비우면 인원 안 셈"}" value="${esc(NEW.slots)}">
     </div>
     <div class="card">
-      <label class="f" style="margin-top:0">보낼 곳</label>
+      <label class="f" style="margin-top:0">지원할 때</label>
+      <div class="chips">${c("noInfo", 1, "📋 정보 없이 바로 (일당·단기)")}${c("noInfo", 0, "📝 정보 받고 (장기 알바)")}</div>
+      <label class="f">보낼 곳</label>
       <div class="chips">${c("where", "g", "👥 그룹방(채널)")}${c("where", "d", "📩 맞는 학생 1:1")}${c("where", "b", "👥 + 📩 둘 다")}</div>
       ${NEW.where !== "g" ? `
         <label class="f">1:1 받을 학생 조건 <span class="muted">(일하는 날 수업 없는 학생만)</span></label>
@@ -314,7 +316,7 @@ function renderNew() {
     const go = async () => {
       const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
       try {
-        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, noInfo: NEW.noInfo !== 0, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "" });
         await load(); setTab("jobs"); location.hash = `job=${r.id}`;

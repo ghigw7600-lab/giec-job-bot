@@ -409,7 +409,9 @@ pm.command("start", async (ctx) => {
   }
   const jobId = /^job_(\d+)$/.exec(payload)?.[1];
   if (jobId) {
-    if (app) return ctx.reply((await applyJob(ctx.api, ctx.from, jobId)).msg);
+    const job = await kv.get(`job:${jobId}`);
+    // 일당·단기 공고는 정보 없이 바로 지원 (2026-11-03 대표 결정)
+    if (app || job?.noInfo) return ctx.reply((await applyJob(ctx.api, ctx.from, jobId)).msg);
     await kv.set(`wantjob:${ctx.from.id}`, Number(jobId), 7 * 24 * 3600); // 정보를 다 내면 자동으로 지원
   }
   if (app) {
@@ -809,16 +811,24 @@ const TOPIK_MIN = [["상관없음", 0], ["1급↑", 1], ["3급↑", 2], ["4급�
 const topikName = (v) => TOPIK_MIN.find((t) => t[1] === v)?.[0] ?? "상관없음";
 const mark = (on, label) => (on ? `✅ ${label}` : label);
 
-const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null, start: null, hours: null, wage: null });
-// 🕘 근무 시간 · 💰 시급 버튼 (2026-11-03 혜승 요청) — 고르면 공고 위에 봇이 한 줄씩 붙임
-const STARTS = [6, 7, 8, 9, 10, 13, 18, 22];
-const HOURS = [4, 5, 6, 8, 9, 10];
-const WAGES = [10320, 11000, 12000, 13000, 15000]; // 10,320 = 2026년 최저시급
-const hh = (h) => `${String(h % 24).padStart(2, "0")}:00`;
-export const timeLabel = (j) => (j.start == null ? null : j.hours ? `${hh(j.start)}–${hh(j.start + j.hours)} (${j.hours}h)` : `${hh(j.start)}~`);
-export const wageLabel = (j) => (j.wage ? `${Number(j.wage).toLocaleString("en-US")}₩ / 1h` : null);
-// 공고 위 한 줄씩 (그룹방·1:1·공고판 같이 씀)
-export const jobMeta = (j) => [timeLabel(j) ? `🕘 ${timeLabel(j)}` : null, wageLabel(j) ? `💰 ${wageLabel(j)}` : null].filter(Boolean);
+const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null, noInfo: true });
+// 공고 정보 (2026-11-03 혜승 요청: 시급·시작·퇴근·근무 시간·주소는 직접 입력, 점심시간은 버튼)
+//   p.meta = { wage, start, end, hours, lunch, addr } → 공고 위에 한 줄씩 봇이 붙임
+const won = (v) => (/^\d[\d,]*$/.test(String(v).trim()) ? `${Number(String(v).replace(/,/g, "")).toLocaleString("en-US")}₩ / 1h` : String(v).trim());
+const LUNCH = { 30: "🍱 30 min", 60: "🍱 1 h", 0: null };
+export const jobMeta = (j) => {
+  const m = j.meta ?? {};
+  const time = m.start || m.end ? `🕘 ${[m.start, m.end].filter(Boolean).join(" – ")}${m.hours ? ` (${m.hours})` : ""}` : m.hours ? `🕘 ${m.hours}` : null;
+  return [time, m.lunch ? LUNCH[m.lunch] : null, m.wage ? `💰 ${won(m.wage)}` : null, m.addr ? `📍 ${m.addr}` : null].filter(Boolean);
+};
+// "9:00" "9시" "09:00" "9" "9시 30분" → 하루 중 몇 분 (출근 확인 시각 계산용)
+export function startMinutes(v) {
+  const t = String(v ?? "").trim();
+  const m = /^(\d{1,2})(?:\s*[:시.]\s*(\d{1,2}))?/.exec(t);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2] ?? 0);
+  return h < 24 && mi < 60 ? h * 60 + mi : null;
+}
 const GENDER = [["성별 상관없음", null], ["남자만", 0], ["여자만", 1]];
 const genderName = (g) => GENDER.find((x) => x[1] === (g ?? null))[0];
 const findDayLabel = (f) => (f.off == null ? "날짜 상관없음" : `${f.off === 0 ? "오늘 " : f.off === 1 ? "내일 " : ""}${dateLabel(f.off)}`);
@@ -829,10 +839,9 @@ const findText = (f) =>
     `📅 일할 날: <b>${findDayLabel(f)}</b>`,
     `📝 TOPIK: <b>${topikName(f.topik)}</b>`,
     `🚻 성별: <b>${genderName(f.gender)}</b>`,
-    `🕘 근무 시간: <b>${timeLabel(f) ?? "안 고름"}</b>`,
-    `💰 시급: <b>${f.wage ? `${f.wage.toLocaleString("ko-KR")}원` : "안 고름"}</b>`,
+    `📋 지원할 때: <b>${f.noInfo ? "정보 없이 바로 지원 (일당·단기)" : "학생 정보 받고 지원 (장기 알바)"}</b>`,
     "",
-    "<i>근무 시간·시급은 고르면 공고 위에 봇이 붙여요 (안 골라도 돼요). 한 번 더 누르면 풀려요.</i>",
+    "<i>시급·시간·주소는 다음 단계에서 직접 써요.</i>",
   ].join("\n");
 const findKeyboard = (f) => {
   const kb = new InlineKeyboard();
@@ -849,12 +858,7 @@ const findKeyboard = (f) => {
   kb.row();
   GENDER.forEach(([n, v]) => kb.text(mark((f.gender ?? null) === v, n), `f:g:${v ?? "any"}`));
   kb.row().text(mark(!!f.noFlaky, "⚠️ 빵꾸 2번 이상 빼기"), `f:n:${f.noFlaky ? 0 : 1}`);
-  kb.row().text("── 🕘 시작 시간 ──", "f:noop").row();
-  STARTS.forEach((h, i) => { kb.text(mark(f.start === h, hh(h)), `f:s:${h}`); if (i === 3) kb.row(); });
-  kb.row().text("── ⏱ 몇 시간 ──", "f:noop").row();
-  HOURS.forEach((h) => kb.text(mark(f.hours === h, `${h}시간`), `f:h:${h}`));
-  kb.row().text("── 💰 시급 ──", "f:noop").row();
-  WAGES.forEach((w, i) => { kb.text(mark(f.wage === w, w === 10320 ? "10,320 최저" : w.toLocaleString("ko-KR")), `f:w:${w}`); if (i === 2) kb.row(); });
+  kb.row().text(mark(f.noInfo, "📋 정보 없이 지원 (일당·단기)"), "f:i:1").row().text(mark(!f.noInfo, "📝 정보 받고 지원 (장기 알바)"), "f:i:0");
   return kb.row().text("🔎 찾기", "f:go");
 };
 
@@ -879,7 +883,7 @@ bot.callbackQuery(/^f:k:(urgent|normal)$/, async (ctx) => {
 });
 
 bot.callbackQuery("f:noop", (ctx) => ctx.answerCallbackQuery());
-bot.callbackQuery(/^f:(o|t|c|g|n|s|h|w):(\w+)$/, async (ctx) => {
+bot.callbackQuery(/^f:(o|t|c|g|n|i):(\w+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
@@ -889,9 +893,7 @@ bot.callbackQuery(/^f:(o|t|c|g|n|s|h|w):(\w+)$/, async (ctx) => {
   if (k === "c") f.car = v === "1";
   if (k === "g") f.gender = v === "any" ? null : Number(v);
   if (k === "n") f.noFlaky = v === "1";
-  if (k === "s") f.start = f.start === Number(v) ? null : Number(v);
-  if (k === "h") f.hours = f.hours === Number(v) ? null : Number(v);
-  if (k === "w") f.wage = f.wage === Number(v) ? null : Number(v);
+  if (k === "i") f.noInfo = v === "1";
   await kv.set(findKey(ctx.from.id), f, FIND_TTL);
   await ctx.editMessageText(findText(f), { ...html, reply_markup: findKeyboard(f) }).catch(() => {});
 });
@@ -922,7 +924,7 @@ bot.callbackQuery("f:go", async (ctx) => {
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
   const list = await findStudents(f);
   await kv.set(findKey(ctx.from.id), { ...f, ids: list.map((a) => a.id) }, FIND_TTL);
-  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)}${jobMeta(f).length ? `\n${jobMeta(f).join(" · ")}` : ""}`;
+  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)} · ${f.noInfo ? "정보 없이 지원" : "정보 받고 지원"}`;
   const lines = list.slice(0, LIST_MAX).map(studentLine);
   if (list.length > LIST_MAX) lines.push(`… 외 ${list.length - LIST_MAX}명`);
   if (f.gender != null) {
@@ -942,22 +944,54 @@ function whereKeyboard(n) {
   if (n) kb.text(`✍️ 📩 이 ${n}명에게 1:1 공고 쓰기`, "p:new:d").row().text(`✍️ 👥 + 📩 둘 다`, "p:new:b");
   return kb;
 }
+// 공고 쓰기 순서: 💰 시급 → 🕘 시작 → 🕔 퇴근 → ⏱ 근무 시간 → 🍱 점심(버튼) → 📍 주소 → ✍️ 공고 글 → 미리보기 → ✅ 보내기
+const META_STEPS = ["wage", "start", "end", "hours", "lunch", "addr"];
+const META_ASK = {
+  wage: "💰 <b>시급</b>을 써 주세요\n예) <code>11000</code> · <code>일당 120,000</code>",
+  start: "🕘 <b>시작 시간</b>\n예) <code>9:00</code> · <code>7시</code>\n(이 시간 30분 뒤에 출근 확인을 물어봐요)",
+  end: "🕔 <b>퇴근 시간</b>\n예) <code>18:00</code>",
+  hours: "⏱ <b>근무 시간</b>\n예) <code>8시간</code>",
+  lunch: "🍱 <b>점심시간</b>",
+  addr: "📍 <b>주소</b>\n예) <code>일산 설문동 606</code>",
+};
+const skipKb = (k) =>
+  k === "lunch"
+    ? new InlineKeyboard().text("30분", "p:l:30").text("1시간", "p:l:60").text("없음", "p:l:0").row().text("⏭ 건너뛰기", "p:skip")
+    : new InlineKeyboard().text("⏭ 건너뛰기", "p:skip");
+async function askMeta(ctx, p) {
+  const k = META_STEPS.find((x) => !(x in (p.meta ?? {})));
+  if (k) {
+    await kv.set(postKey(ctx.from.id), { ...p, step: k }, 1800);
+    return ctx.reply(META_ASK[k], { ...html, reply_markup: skipKb(k) });
+  }
+  await kv.set(postKey(ctx.from.id), { ...p, step: "text" }, 1800);
+  const meta = jobMeta({ meta: p.meta });
+  return ctx.reply(
+    [
+      `✍️ <b>${WHERE[p.where]}</b> — 마지막으로 공고 내용을 메시지 한 개로 보내주세요 (글, 또는 사진 + 설명)`,
+      meta.length ? `공고 위에 붙는 줄:\n${meta.join("\n")}` : null,
+      "예) <code>365로지스 / 4명\n단순 하차 업무</code>",
+      "",
+      "보내면 <b>미리보기</b>가 먼저 나오고, [✅ 보내기]를 눌러야 올라가요. 그만두려면 /cancel",
+    ].filter((x) => x != null).join("\n"),
+    html
+  );
+}
 bot.callbackQuery(/^p:new:(g|d|b)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
   const f = await kv.get(findKey(ctx.from.id));
   if (!f) return ctx.reply("찾기 조건이 사라졌어요. /find 부터 다시 해주세요.");
-  await kv.set(postKey(ctx.from.id), { step: "text", where: ctx.match[1] }, 1800);
-  return ctx.reply(
-    [
-      `✍️ <b>${WHERE[ctx.match[1]]}</b> — 공고 내용을 메시지 한 개로 보내주세요 (글, 또는 사진 + 설명)`,
-      "지금 그룹방에 올리는 모양 그대로 쓰면 돼요. 예)",
-      "<code>365로지스 / 4명\n단순 하차 업무\n위치 : 일산 설문동 606</code>",
-      "",
-      "날짜·근무 시간·시급(위에서 고른 것), [🙋 지원하기] 버튼, 우즈벡어·키르기스어 안내는 봇이 붙여요. 그만두려면 /cancel",
-    ].join("\n"),
-    html
-  );
+  return askMeta(ctx, { where: ctx.match[1], meta: {} });
+});
+bot.callbackQuery(/^p:(skip|l:(\d+))$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  const p = await kv.get(postKey(ctx.from.id));
+  if (!p || !META_STEPS.includes(p.step)) return;
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  p.meta = { ...(p.meta ?? {}), [p.step]: ctx.match[2] != null ? Number(ctx.match[2]) : null };
+  return askMeta(ctx, p);
 });
 
 admin.command("cancel", async (ctx) => {
@@ -1006,7 +1040,15 @@ async function sendTo(api, chatId, job, text, markup) {
 // 관리자가 공고 글을 보냄 → 미리보기 + 어디로 보낼지
 admin.on("message", async (ctx, next) => {
   const p = await kv.get(postKey(ctx.from.id));
-  if (!p || p.step !== "text" || ctx.message.text?.startsWith("/")) return next();
+  if (!p || ctx.message.text?.startsWith("/")) return next();
+  if (META_STEPS.includes(p.step)) {
+    if (p.step === "lunch") return ctx.reply("점심시간은 버튼으로 골라 주세요 👇", { reply_markup: skipKb("lunch") });
+    const v = ctx.message.text?.trim();
+    if (!v) return ctx.reply("글로 써 주세요. 넘어가려면 ⏭ 건너뛰기", { reply_markup: skipKb(p.step) });
+    p.meta = { ...(p.meta ?? {}), [p.step]: v.slice(0, 80) };
+    return askMeta(ctx, p);
+  }
+  if (p.step !== "text") return next();
   const m = ctx.message;
   if (m.text == null && !(m.photo || m.video || m.document || m.animation)) return ctx.reply("글이나 사진(+설명)으로 보내주세요. 그만두려면 /cancel");
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
@@ -1022,9 +1064,9 @@ admin.on("message", async (ctx, next) => {
     text: m.text ?? null,
     caption: m.caption ?? "",
     ids: f.ids ?? [],
-    start: f.start ?? null,
-    hours: f.hours ?? null,
-    wage: f.wage ?? null,
+    meta: p.meta ?? {},
+    startMin: startMinutes(p.meta?.start),
+    noInfo: f.noInfo !== false,
     by: fullName(ctx.from),
     at: Date.now(),
   };
@@ -1036,11 +1078,11 @@ admin.on("message", async (ctx, next) => {
   const where = p.where ?? "g";
   const n = job.ids.length;
   if (where !== "d") {
-    await ctx.reply("👀 <b>그룹방에는 이렇게 올라가요</b>", html);
+    await ctx.reply("👀 <b>미리보기 — 아직 안 올라갔어요.</b> 채널에는 이렇게 올라가요 👇", html);
     await sendTo(ctx.api, ctx.chat.id, job, groupBody(job), groupMarkup(ctx.me.username, jobId));
   }
   if (where !== "g") {
-    await ctx.reply("👀 <b>1:1로는 이렇게 가요</b>", html);
+    await ctx.reply("👀 <b>미리보기 — 아직 안 보냈어요.</b> 1:1로는 이렇게 가요 👇", html);
     await sendTo(ctx.api, ctx.chat.id, job, dmBody(job, "uz"), dmMarkup("uz", jobId));
   }
   await ctx.reply(
@@ -1065,7 +1107,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEND_MAX = 150; // 1:1 한 번에 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
 
 // 관리 미니앱에서 새 공고 만들기 (글만)
-export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [] }) {
+export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [], noInfo = true }) {
   const id = await kv.incr("jobseq");
   const m = /(\d{1,3})\s*명/.exec(text ?? "");
   const job = {
@@ -1082,6 +1124,7 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     by,
     at: Date.now(),
     slots: slots ? Number(slots) : m ? Number(m[1]) : null,
+    noInfo,
   };
   await kv.set(`job:${id}`, job, JOB_TTL);
   return job;
@@ -1228,10 +1271,10 @@ export async function applyJob(api, from, jobId) {
     if (left === 0) await closeJob(api, job);
   }
   await kv.sadd(K.jobApps(jobId), from.id);
-  await kv.set(K.jobApp(jobId, from.id), { at: Date.now() }, JOB_TTL);
+  await kv.set(K.jobApp(jobId, from.id), { at: Date.now(), name: fullName(from), username: from.username ?? null }, JOB_TTL);
   const who = app
     ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
-    : [`👤 <a href="tg://user?id=${from.id}">${esc(fullName(from))}</a>`];
+    : [`👤 <a href="tg://user?id=${from.id}">${esc(fullName(from))}</a>${from.username ? ` (@${esc(from.username)})` : ""} · 정보 없음 (일당·단기 지원)`];
   const first = (job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40);
   for (const a of adminIds()) {
     await api
@@ -1294,8 +1337,9 @@ bot.callbackQuery(/^a:unapply:(\d+):(\d+)$/, async (ctx) => {
 //  답이 없으면 다음 날 아침 한 번 더. 학생에게는 아무것도 안 감
 export async function jobApplicants(jobId) {
   const ids = (await kv.smembers(K.jobApps(jobId))) ?? [];
-  const apps = await kv.mget(ids.map(K.app));
-  return ids.map((id, i) => apps[i] ?? { id: Number(id), name: `#${id}` });
+  const [apps, joins] = await Promise.all([kv.mget(ids.map(K.app)), kv.mget(ids.map((id) => K.jobApp(jobId, id)))]);
+  // 정보 없이 지원한 학생은 텔레그램 이름으로
+  return ids.map((id, i) => apps[i] ?? { id: Number(id), name: joins[i]?.name ?? `#${id}`, username: joins[i]?.username ?? null, guest: true });
 }
 
 // r = "ok" | "no" | null(지우기)
@@ -1366,7 +1410,9 @@ export async function checkAttendance(api) {
       continue;
     }
     const n = job.attAsked ?? 0;
-    const first = n === 0 && (day < today || (day === today && h >= 20));
+    // 시작 시간이 있으면 그 30분 뒤에, 없으면 예전처럼 그날 저녁 8시
+    const startAt = job.startMin != null && job.date ? Date.parse(`${job.date}T00:00:00+09:00`) + (job.startMin + 30) * 60e3 : null;
+    const first = n === 0 && (startAt ? Date.now() >= startAt : day < today || (day === today && h >= 20));
     const second = n === 1 && day < today && h >= 10 && Date.now() - (job.attAskedAt ?? 0) > 10 * 3600e3;
     if (!first && !second) continue;
     job.attAsked = n + 1;

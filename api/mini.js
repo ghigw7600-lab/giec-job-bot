@@ -193,12 +193,12 @@ const ADMIN = {
     return { count: list.length, sample: list.slice(0, 50).map(studentView) };
   },
   // 새 공고 보내기
-  async send({ text, kind, off, slots, where, filter }) {
+  async send({ text, kind, off, slots, where, filter, noInfo }) {
     if (!String(text ?? "").trim()) throw new Error("공고 내용을 써 주세요");
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids });
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids, noInfo: noInfo !== false });
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },
@@ -235,7 +235,8 @@ const STUDENT = {
   },
   async apply({ id }) {
     const app = await kv.get(`app:${this.user.id}`);
-    if (!app) {
+    const job = await kv.get(`job:${Number(id)}`);
+    if (!app && !job?.noInfo) {
       // 정보를 아직 안 냄 → 봇으로 보내서 9단계 후 자동 지원
       return { needInfo: true, link: `https://t.me/${await botName()}?start=job_${Number(id)}` };
     }

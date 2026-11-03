@@ -1,0 +1,19 @@
+# 10분마다 봇 정기 확인 (출근 확인을 공고 시작 시간 30분 뒤에 맞춰 묻기 위해)
+#  Vercel 무료 요금제는 하루 2번만 부를 수 있어서 GitHub가 대신 10분마다 부름
+#  필요: GitHub 저장소 Settings → Secrets and variables → Actions → New repository secret
+#        이름 JOB_CRON_KEY, 값 = Vercel 환경변수 WEBHOOK_SECRET 과 같은 값
+name: 정기 확인
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 봇 정기 확인 부르기
+        env:
+          KEY: ${{ secrets.JOB_CRON_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "JOB_CRON_KEY 가 없어요 — 저장소 Secrets 에 넣어 주세요"; exit 0; fi
+          curl -sS -m 50 "https://giec-job-bot.vercel.app/api/cron?key=$KEY" || true
