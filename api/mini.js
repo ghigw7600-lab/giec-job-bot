@@ -25,6 +25,7 @@ import {
   removeManualNoShow,
   cancelAsNoShow,
   JOB_TEMPLATE,
+  askDays,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -161,6 +162,16 @@ const ADMIN = {
     return { ok: true };
   },
   // 🗑 학생 기록 지우기 (혜승 요청 11-04: 카드 안에서 한 명 / 학생 목록에서 골라서 여러 명)
+  // 🔄 수업 요일 다시 받기 (학생 카드 한 명 / 학생 목록에서 고른 여러 명)
+  async days({ uids }) {
+    const list = [...new Set((Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean))].slice(0, 150);
+    let ok = 0;
+    for (const id of list) {
+      if (await askDays(bot.api, id)) ok++;
+      await new Promise((r) => setTimeout(r, 40)); // 텔레그램 속도 제한
+    }
+    return { ok, fail: list.length - ok };
+  },
   async del({ uids }) {
     const list = [...new Set((Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean))].slice(0, 500);
     for (const id of list) {

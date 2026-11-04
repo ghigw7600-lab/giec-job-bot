@@ -818,19 +818,25 @@ bot.callbackQuery(/^a:st:(\w+):(\d+)$/, async (ctx) => {
 });
 
 // 관리자: 수업 요일 다시 받기 (새 학기)
+// 🔄 수업 요일 다시 받기 — 학생에게 요일 질문을 보냄 (봇 카드 · 관리 미니앱 학생 카드 · 여러 명 한꺼번에 같이 씀)
+export async function askDays(api, id) {
+  const app = await kv.get(K.app(id));
+  if (!app) return false;
+  const st = { step: "days", lang: app.lang ?? "uz", mode: "days", data: { days: [] } };
+  try {
+    await api.sendMessage(id, tx(st.lang, "daysAgain"), { ...html, reply_markup: daysKeyboard(st.lang, []) });
+    await kv.set(K.state(id), st, STATE_TTL);
+    return true;
+  } catch {
+    return false;
+  }
+}
 bot.callbackQuery(/^a:days:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   const id = Number(ctx.match[1]);
-  const app = await kv.get(K.app(id));
-  if (!app) return ctx.answerCallbackQuery({ text: "지원자 정보를 찾을 수 없어요.", show_alert: true });
-  const st = { step: "days", lang: app.lang ?? "uz", mode: "days", data: { days: [] } };
-  try {
-    await kv.set(K.state(id), st, STATE_TTL);
-    await ctx.api.sendMessage(id, tx(st.lang, "daysAgain"), { ...html, reply_markup: daysKeyboard(st.lang, []) });
-    await ctx.answerCallbackQuery({ text: "✅ 학생에게 요일 질문을 보냈어요", show_alert: true });
-  } catch (e) {
-    await ctx.answerCallbackQuery({ text: `보내지 못했어요 (학생이 봇을 차단했을 수 있어요)`, show_alert: true });
-  }
+  if (!(await kv.get(K.app(id)))) return ctx.answerCallbackQuery({ text: "지원자 정보를 찾을 수 없어요.", show_alert: true });
+  const ok = await askDays(ctx.api, id);
+  await ctx.answerCallbackQuery({ text: ok ? "✅ 학생에게 요일 질문을 보냈어요" : "보내지 못했어요 (학생이 봇을 차단했을 수 있어요)", show_alert: true });
 });
 
 // ═════════════ 🔎 학생 찾기 · 📢 공고 보내기 ═════════════
