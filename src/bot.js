@@ -1384,7 +1384,7 @@ export async function applyJob(api, from, jobId) {
           link_preview_options: { is_disabled: true },
           reply_markup: (() => {
             const kb = new InlineKeyboard()
-              .text("🚫 직전 취소 = 빵꾸", `a:nocancel:${jobId}:${from.id}`)
+              .text("🚫 직전 취소 (빵꾸)", `a:nocancel:${jobId}:${from.id}`)
               .row()
               .text("↩️ 그냥 지원 취소 (자리 다시 열기)", `a:unapply:${jobId}:${from.id}`);
             if (adminAppUrl()) kb.row().webApp("📋 관리 화면에서 보기", adminAppUrl(`job=${jobId}`));
