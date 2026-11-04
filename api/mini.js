@@ -26,6 +26,9 @@ import {
   cancelAsNoShow,
   JOB_TEMPLATE,
   askDays,
+  addWork,
+  editJob,
+  deleteJobs,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -71,6 +74,7 @@ const studentView = (a) => ({
   car: a.car === 0,
   days: (a.days ?? []).map((i) => KO.days[i]),
   status: a.status ?? "new",
+  rank: a.rank ?? null,
   guest: !!a.guest,
   lang: langName(a.lang),
   tgName: a.tgName,
@@ -102,6 +106,9 @@ async function jobView(job) {
     attNo: Object.values(att).filter((r) => r === "no").length,
     repostOf: job.repostOf ?? null,
     form: job.form ?? null,
+    kindPay: job.form?.payType ?? null,
+    place: job.form?.title ?? first(job).replace(/^📢\s*\[GIEC JOB\]\s*/, "").replace(/\s*모집!?\s*$/, ""),
+    off: job.off ?? null,
   };
 }
 
@@ -171,6 +178,28 @@ const ADMIN = {
       await new Promise((r) => setTimeout(r, 40)); // 텔레그램 속도 제한
     }
     return { ok, fail: list.length - ok };
+  },
+  // ⭐ 랭크 S·A·B·C (같은 걸 다시 누르면 지움)
+  async rank({ uid, rank }) {
+    const app = await kv.get(`app:${Number(uid)}`);
+    if (!app) throw new Error("학생을 찾을 수 없어요");
+    app.rank = ["S", "A", "B", "C"].includes(rank) ? rank : null;
+    await kv.set(`app:${app.id}`, app);
+    return { ok: true, rank: app.rank };
+  },
+  // 📝 근무 이력 직접 넣기 / 지우기
+  async workAdd({ uid, title, date, r, jobId }) {
+    await addWork(Number(uid), { title, date, r, jobId, by: this.who });
+    return { ok: true };
+  },
+  // ✏️ 공고 고치기 / 🗑 공고 지우기
+  async editJob({ id, text, slots, form }) {
+    const job = await editJob(bot.api, Number(id), { text, slots, form });
+    return { ok: true, id: job.id };
+  },
+  async delJobs({ ids }) {
+    const list = [...new Set((Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean))].slice(0, 200);
+    return { ok: true, n: await deleteJobs(bot.api, list) };
   },
   async del({ uids }) {
     const list = [...new Set((Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean))].slice(0, 500);

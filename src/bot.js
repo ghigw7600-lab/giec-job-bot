@@ -1485,13 +1485,66 @@ export async function addNoShow(uid, note, by) {
   await kv.set(K.app(uid), app);
   return app;
 }
+// 📝 근무 이력 직접 넣기 (혜승 요청 11-04: 업장 고르기/검색 + 날짜 + 출근/빵꾸)
+export async function addWork(uid, { title, date, r, jobId, by }) {
+  const app = await kv.get(K.app(uid));
+  if (!app) throw new Error("학생을 찾을 수 없어요");
+  const res = r === "no" ? "no" : "ok";
+  if (res === "ok") app.workOk = (app.workOk ?? 0) + 1;
+  else app.workNo = (app.workNo ?? 0) + 1;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? date : todayISO();
+  app.hist = [{ job: jobId ? Number(jobId) : null, date: d, r: res, title: String(title ?? "").trim().slice(0, 60) || "직접 추가", by, manual: Date.now() }, ...(app.hist ?? [])]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .slice(0, 50);
+  await kv.set(K.app(uid), app);
+  return app;
+}
+// ✏️ 공고 고치기 — 채널 공고 글도 같이 바꿈
+export async function editJob(api, id, { text, slots, form }) {
+  const job = await kv.get(`job:${id}`);
+  if (!job) throw new Error("공고를 찾을 수 없어요");
+  const t = String(text ?? "").trim();
+  if (!t) throw new Error("공고 내용을 써 주세요");
+  if (job.text != null) job.text = t;
+  else job.caption = t;
+  const m = /(\d{1,3})\s*명/.exec(t);
+  job.slots = slots ? Number(slots) : m ? Number(m[1]) : job.slots;
+  job.startMin = textStartMin(t) ?? job.startMin ?? null;
+  if (form && typeof form === "object") job.form = form;
+  job.editedAt = Date.now();
+  await kv.set(`job:${id}`, job, JOB_TTL);
+  if (job.group) {
+    const name = await meName(api);
+    const body = groupBody(job, !!job.closed);
+    const markup = job.closed ? closedMarkup(name) : groupMarkup(name, job.id);
+    const r = job.text != null
+      ? api.editMessageText(job.group.chat, job.group.msgId, body, { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } })
+      : api.editMessageCaption(job.group.chat, job.group.msgId, { caption: body.slice(0, 1024), parse_mode: "HTML", reply_markup: markup });
+    await r.catch((e) => { if (!/not modified/.test(e.description ?? "")) throw new Error("채널 공고를 못 고쳤어요: " + (e.description ?? e.message)); });
+  }
+  return job;
+}
+// 🗑 공고 지우기 — 채널 공고 글도 지움 (지원·출근 기록은 학생 카드에 남음)
+export async function deleteJobs(api, ids) {
+  let n = 0;
+  for (const id of ids) {
+    const job = await kv.get(`job:${id}`);
+    if (!job) continue;
+    if (job.group) await api.deleteMessage(job.group.chat, job.group.msgId).catch(() => {});
+    await kv.del(`job:${id}`);
+    await kv.srem(K.jobs, Number(id));
+    n++;
+  }
+  return n;
+}
 export async function removeManualNoShow(uid, at) {
   const app = await kv.get(K.app(uid));
   if (!app) throw new Error("학생을 찾을 수 없어요");
   const i = (app.hist ?? []).findIndex((h) => h.manual === Number(at));
   if (i < 0) throw new Error("이미 지웠어요");
-  app.hist.splice(i, 1);
-  app.workNo = Math.max(0, (app.workNo ?? 0) - 1);
+  const [h] = app.hist.splice(i, 1);
+  if (h.r === "ok") app.workOk = Math.max(0, (app.workOk ?? 0) - 1);
+  else app.workNo = Math.max(0, (app.workNo ?? 0) - 1);
   await kv.set(K.app(uid), app);
   return app;
 }
