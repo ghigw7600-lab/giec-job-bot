@@ -265,8 +265,8 @@ async function saveAndCard(api, app, title) {
 // ═════════════ 관리자 카드 ═════════════
 const STATUS = {
   new: "🆕 신규",
-  contacted: "🟡 연락함",
-  introduced: "🟢 소개함",
+  contacted: "🟡 연락완료",
+  introduced: "🟢 연결완료",
   closed: "⚫ 종결",
 };
 // 일한 기록 표시: ⭐ 출근 3번 이상 + 빵꾸 0 · ⚠️ 빵꾸 2번 이상
@@ -305,9 +305,8 @@ const cardKeyboard = (id) => {
 };
 const cardKeyboardBase = (id) =>
   new InlineKeyboard()
-    .text("🟡 연락함", `a:st:contacted:${id}`)
-    .text("🟢 소개함", `a:st:introduced:${id}`)
-    .text("⚫ 종결", `a:st:closed:${id}`)
+    .text("🟡 연락완료", `a:st:contacted:${id}`)
+    .text("🟢 연결완료", `a:st:introduced:${id}`)
     .row()
     .text("🔄 수업 요일 다시 받기", `a:days:${id}`)
     .row()
@@ -456,7 +455,7 @@ const HELP = [
   "/delete 숫자ID — 학생 정보 지우기 (학생이 삭제를 요청할 때, 숫자ID는 엑셀 맨 오른쪽 칸)",
   "",
   "새 지원자가 정보를 다 내면 이 대화로 카드가 와요.",
-  "카드의 [🟡 연락함] [🟢 소개함] [⚫ 종결] 로 진행 상태를 표시하세요.",
+  "카드의 [🟡 연락완료] [🟢 연결완료] 로 진행 상태를 표시하세요.",
 ].join("\n");
 
 const admin = pm.filter((ctx) => isAdmin(ctx.from?.id));

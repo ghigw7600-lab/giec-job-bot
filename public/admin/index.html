@@ -93,7 +93,7 @@ async function api(action, args = {}) {
   return j;
 }
 
-const STATUS = { new: "🆕 신규", contacted: "🟡 연락함", introduced: "🟢 소개함", closed: "⚫ 종결" };
+const STATUS = { new: "🆕 신규", contacted: "🟡 연락완료", introduced: "🟢 연결완료", closed: "⚫ 종결" }; // 종결 버튼은 없앰(11-04), 예전 값 표시용
 const badge = (s) => (s.workNo >= 2 ? "⚠️" : s.workOk >= 3 && !s.workNo ? "⭐" : "");
 const ago = (ts) => { if (!ts) return ""; const m = Math.round((Date.now() - ts) / 60000); return m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
 const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -344,7 +344,7 @@ function renderStudent(id) {
         <div>📅 수업: ${s.days.length ? s.days.join("·") : "없음"}</div>
         <div>💬 ${esc(s.tgName)}${s.username ? ` · <a href="#" id="chat">@${esc(s.username)}</a>` : ""}</div>
       </div>
-      <div class="chips" style="margin-top:12px">${Object.entries(STATUS).map(([k, n]) => `<button class="chip ${s.status === k ? "on" : ""}" data-st="${k}">${n}</button>`).join("")}</div>
+      <div class="chips" style="margin-top:12px">${Object.entries(STATUS).filter(([k]) => k !== "closed" || s.status === "closed").map(([k, n]) => `<button class="chip ${s.status === k ? "on" : ""}" data-st="${k}">${n}</button>`).join("")}</div>
     </div>
     <div class="card">
       <b>📈 일한 기록</b> <span class="muted">출근 ${s.workOk} · 빵꾸 ${s.workNo}</span>
