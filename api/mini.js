@@ -24,6 +24,7 @@ import {
   addNoShow,
   removeManualNoShow,
   cancelAsNoShow,
+  JOB_TEMPLATE,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -123,6 +124,7 @@ const ADMIN = {
     return {
       jobs,
       students,
+      template: JOB_TEMPLATE,
       stats: {
         students: students.length,
         newStudents: students.filter((s) => s.status === "new").length,

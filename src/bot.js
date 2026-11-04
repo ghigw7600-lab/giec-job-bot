@@ -878,6 +878,13 @@ export const jobMeta = (j) => {
   // 혜승 피드백(11-03): 이모티콘은 급구·일시·지원만, 나머지는 글자로
   return [time, m.lunch ? `점심시간 · Tushlik · Обед: ${LUNCH[m.lunch]}` : null, m.wage ? payLine(m.wage) : null, m.addr ? `주소 · Manzil · Адрес: ${m.addr}` : null].filter(Boolean);
 };
+// 공고 양식 (11-04 혜승 확정) — 혜승이 직접 다 채워서 보냄, 봇은 그대로 올림
+export const JOB_TEMPLATE = "📢 [GIEC JOB] (업체·업무) 모집!\n🧺 업무: \n👩 모집인원: \n📍 근무 위치\n(주소)\n━━━━━━━━━━━━━━\n⏰ 근무 조건\n📅 근무요일: \n(요일)\n휴무: \n🕘 평일 근무시간\n(요일): 09:00 ~ 18:00\n🕙 주말 근무시간\n(요일): 10:00 ~ 13:00\n━━━━━━━━━━━━━━\n💰 급여 조건\n평일 시급: \n주말 시급: \n급여 방식: \n급여 지급일: ";
+// 공고 글에서 첫 "09:00" 같은 시각 → 출근 확인 기준 시작 시간
+export const textStartMin = (t) => {
+  const m = /(\d{1,2})\s*:\s*(\d{2})/.exec(String(t ?? ""));
+  return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
 // "9:00" "9시" "09:00" "9" "9시 30분" → 하루 중 몇 분 (출근 확인 시각 계산용)
 export function startMinutes(v) {
   const t = String(v ?? "").trim();
@@ -897,7 +904,7 @@ const findText = (f) =>
     `📝 TOPIK: <b>${topikName(f.topik)}</b>`,
     `🚻 성별: <b>${genderName(f.gender)}</b>`,
     "",
-    "<i>시급·시간·주소는 다음 단계에서 직접 써요.</i>",
+    "<i>다음 단계에서 공고 양식을 드려요 — 빈칸을 채워 보내면 돼요.</i>",
   ].join("\n");
 const findKeyboard = (f) => {
   const kb = new InlineKeyboard();
@@ -1037,7 +1044,19 @@ bot.callbackQuery(/^p:new:(g|d|b)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const f = await kv.get(findKey(ctx.from.id));
   if (!f) return ctx.reply("찾기 조건이 사라졌어요. /find 부터 다시 해주세요.");
-  return askMeta(ctx, { where: ctx.match[1], meta: {} });
+  // (11-04) 시급·시간 따로 묻지 않음 — 양식 안에 혜승이 다 채움
+  await kv.set(postKey(ctx.from.id), { where: ctx.match[1], meta: {}, step: "text" }, 1800);
+  await ctx.reply(
+    [
+      `✍️ <b>${WHERE[ctx.match[1]]}</b> — 아래 양식을 길게 눌러 복사한 뒤, 빈칸을 채워 메시지 한 개로 보내주세요 (사진 + 설명도 돼요)`,
+      "",
+      "• 모집인원에 <b>숫자+명</b>(예: 여성 1명)을 쓰면 남은 인원을 세요",
+      "• 근무시간의 첫 시각(예: 09:00)으로 30분 뒤 출근 확인을 물어봐요",
+      "• 보내면 미리보기가 먼저 나오고 [✅ 보내기]를 눌러야 올라가요. 그만두려면 /cancel",
+    ].join("\n"),
+    html,
+  );
+  return ctx.reply(`<pre>${esc(JOB_TEMPLATE)}</pre>`, html);
 });
 bot.callbackQuery(/^p:(skip|l:(\d+))$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
@@ -1059,17 +1078,17 @@ admin.command("cancel", async (ctx) => {
 const jobDate = (job) => (job.off == null ? null : job.dateLabel);
 // 그룹방용 (여러 나라 학생이 같이 봄 → 짧게 3개 언어)
 function groupBody(job, closed = false) {
-  const head =
-    job.kind === "urgent" ? "🚨 <b>급구 · Shoshilinch · Срочно</b>" : "<b>일자리 · Ish · Работа</b>";
+  // (11-04) 채널 공고는 한글만 — 학생은 텔레그램 번역 기능 사용. 혜승 양식 글을 그대로 올림
+  const head = job.kind === "urgent" ? "🚨 <b>급구</b>" : null;
   const body = job.text != null ? job.text : job.caption ?? "";
   return [
-    closed ? "<b>[모집 완료] Qabul yakunlandi · Набор завершён</b>" : head,
+    closed ? "✅ <b>[모집 완료]</b>" : head,
     jobDate(job) ? `📅 ${jobDate(job)}` : null,
     ...jobMeta(job),
     "",
     esc(body),
     "",
-    closed ? null : "👇 지원 · Ariza · Арыз — tugmani bosing",
+    closed ? null : "👇 아래 [지원하기] 버튼을 눌러 주세요",
   ]
     .filter((x) => x !== null)
     .join("\n")
@@ -1088,8 +1107,8 @@ const boardLink = (username) => `https://t.me/${username}?startapp=jobs`; // 채
 let meNameCache = null;
 const meName = async (api) => (meNameCache ??= (await api.getMe().catch(() => null))?.username ?? null);
 const groupMarkup = (username, jobId) =>
-  new InlineKeyboard().url("🙋 지원하기 · Ariza berish", `https://t.me/${username}?start=job_${jobId}`).row().url("💼 다른 일자리 · Boshqa ishlar", boardLink(username));
-const closedMarkup = (username) => (username ? new InlineKeyboard().url("💼 다른 일자리 · Boshqa ishlar", boardLink(username)) : { inline_keyboard: [] });
+  new InlineKeyboard().url("🙋 지원하기", `https://t.me/${username}?start=job_${jobId}`).row().url("💼 다른 일자리 보기", boardLink(username));
+const closedMarkup = (username) => (username ? new InlineKeyboard().url("💼 다른 일자리 보기", boardLink(username)) : { inline_keyboard: [] });
 
 async function sendTo(api, chatId, job, text, markup) {
   const opts = { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } };
@@ -1125,7 +1144,7 @@ admin.on("message", async (ctx, next) => {
     caption: m.caption ?? "",
     ids: f.ids ?? [],
     meta: p.meta ?? {},
-    startMin: startMinutes(p.meta?.start),
+    startMin: startMinutes(p.meta?.start) ?? textStartMin(m.text ?? m.caption),
     noInfo: false,
     by: fullName(ctx.from),
     at: Date.now(),
@@ -1151,6 +1170,8 @@ admin.on("message", async (ctx, next) => {
       : `ℹ️ 글에 "4명"처럼 인원 숫자가 없어서 남은 인원은 세지 않아요. 세려면 /cancel 후 인원을 넣어 다시 보내주세요.`,
     html
   );
+  const left = ["(업체·업무)", "(주소)", "(요일)"].filter((x) => (job.text ?? job.caption ?? "").includes(x));
+  if (left.length) await ctx.reply(`⚠️ 양식 빈칸이 남았어요: ${left.join(" ")} — 고치려면 ❌ 취소 후 다시 보내주세요`);
   const target = where === "g" ? "그룹방에 올릴까요?" : where === "d" ? `${n}명에게 1:1로 보낼까요?` : `그룹방에 올리고 ${n}명에게 1:1로도 보낼까요?`;
   return ctx.reply(`📢 공고 #${jobId} — ${target}`, {
     reply_markup: new InlineKeyboard().text("✅ 보내기", `p:send:${jobId}:${where}`).text("❌ 취소", "p:cancel"),
@@ -1181,6 +1202,7 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     text,
     caption: "",
     ids,
+    startMin: textStartMin(text),
     by,
     at: Date.now(),
     slots: slots ? Number(slots) : m ? Number(m[1]) : null,
@@ -1293,8 +1315,8 @@ export async function reopenJob(api, job, username) {
 async function postRemaining(api, job, left) {
   if (!job.group) return;
   const text = left > 0
-    ? `🔔 <b>${left}명 남았습니다</b> · ${left} kishi qoldi · Осталось ${left}`
-    : "✅ <b>모집 완료됐습니다</b> · Qabul yakunlandi · Набор завершён";
+    ? `🔔 <b>${left}명 남았습니다</b>`
+    : "✅ <b>모집 완료됐습니다</b>";
   await api
     .sendMessage(job.group.chat, text, { parse_mode: "HTML", disable_notification: true, reply_parameters: { message_id: job.group.msgId, allow_sending_without_reply: true } })
     .catch(() => {});
