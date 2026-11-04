@@ -1044,11 +1044,16 @@ bot.callbackQuery(/^p:new:(g|d|b)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const f = await kv.get(findKey(ctx.from.id));
   if (!f) return ctx.reply("찾기 조건이 사라졌어요. /find 부터 다시 해주세요.");
-  // (11-04) 시급·시간 따로 묻지 않음 — 양식 안에 혜승이 다 채움
+  // (11-04) 시급·시간 따로 묻지 않음 — 관리 화면에서 칸을 눌러 채우거나(추천), 양식을 복사해 채워 보냄
   await kv.set(postKey(ctx.from.id), { where: ctx.match[1], meta: {}, step: "text" }, 1800);
+  if (adminAppUrl())
+    await ctx.reply("📝 <b>칸을 눌러 채우기</b> (추천) — 제목·업무·인원·요일·시간·시급을 누르고 쓰면 공고 글이 자동으로 만들어져요.\n(관리 화면에서 받을 학생·보낼 곳을 다시 골라요)", {
+      ...html,
+      reply_markup: new InlineKeyboard().webApp("📝 공고 칸 채우기", adminAppUrl(`new=${f.kind}:${f.off ?? ""}`)),
+    });
   await ctx.reply(
     [
-      `✍️ <b>${WHERE[ctx.match[1]]}</b> — 아래 양식을 길게 눌러 복사한 뒤, 빈칸을 채워 메시지 한 개로 보내주세요 (사진 + 설명도 돼요)`,
+      `✍️ 또는 여기서 바로: <b>${WHERE[ctx.match[1]]}</b> — 아래 양식을 눌러 복사한 뒤, 빈칸을 채워 메시지 한 개로 보내주세요 (사진 + 설명도 돼요)`,
       "",
       "• 모집인원에 <b>숫자+명</b>(예: 여성 1명)을 쓰면 남은 인원을 세요",
       "• 근무시간의 첫 시각(예: 09:00)으로 30분 뒤 출근 확인을 물어봐요",
