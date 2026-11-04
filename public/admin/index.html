@@ -354,13 +354,14 @@ function renderNew() {
       <label class="f">일하는 날</label>
       <div class="chips">${offs.map((o) => c("off", o, (o === 0 ? "오늘 " : o === 1 ? "내일 " : "") + kst(o))).join("")}${NEW.kind === "normal" ? c("off", "", "날짜 상관없음") : ""}</div>
     </div>
-    ${!F.payType && !NEW.raw ? `<div class="empty">② 급여 형태(시간제 · 주급제 · 월급제)를 고르면 공고 칸이 나와요</div>` : NEW.raw ? `<div class="card">
+    ${!F.payType && !NEW.raw ? `<div class="empty">② 급여 형태(시간제 · 주급제 · 월급제)를 고르면 공고 칸이 나와요<br><br><button class="btn ghost sm" id="past0" type="button">📋 지난 공고 불러오기</button></div>` : NEW.raw ? `<div class="card">
       <label class="f" style="margin-top:0">공고 글 직접 고치기 <button class="btn ghost sm" id="toForm" type="button">↩️ 칸 채우기로</button></label>
       <textarea id="text" style="min-height:320px">${esc(NEW.text)}</textarea>
       <label class="f">모집 인원 <span class="muted">${slotsAuto ? `(글에서 ${slotsAuto}명 읽음 — 바꾸려면 입력)` : "(글에 'N명'이 있으면 자동)"}</span></label>
       <input id="slots" inputmode="numeric" placeholder="${slotsAuto ?? "비우면 인원 안 셈"}" value="${esc(NEW.slots)}">
     </div>` : `<div class="card">
-      <b>📢 공고 칸 채우기</b>
+      <div class="row"><b class="sp">📢 공고 칸 채우기</b><button class="btn ghost sm" id="past" type="button">📋 지난 공고 불러오기</button></div>
+      ${NEW.pastOpen ? `<div style="margin:8px 0;max-height:260px;overflow:auto">${(DATA.jobs ?? []).filter((j) => j.text).slice(0, 30).map((j) => `<button class="card" data-past="${j.id}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px"><b>#${j.id}</b> ${esc(j.title)} <span class="muted">${j.dateLabel ?? ""}${j.form ? "" : " · 글로 불러옴"}</span></button>`).join("") || `<div class="muted">지난 공고가 없어요</div>`}</div>` : ""}
       <label class="f">제목 <span class="muted">"… 모집!" 앞</span></label><input data-f="title" placeholder="빨래공장 여성 근로자" value="${esc(F.title)}">
       <label class="f">🧺 업무</label><input data-f="task" placeholder="세탁공장 근무" value="${esc(F.task)}">
       <label class="f">👩 모집인원</label>
@@ -405,6 +406,7 @@ function renderNew() {
   }));
   if (!F.payType && !NEW.raw) {
     $("#send").disabled = true;
+    $("#past0").onclick = () => { F.payType = "시간제"; NEW.pastOpen = true; renderNew(); };
   } else if (NEW.raw) {
     $("#text").oninput = () => { sync(); const m = (/(\d{1,3})\s*명/.exec(NEW.text) || [])[1]; $("#slots").placeholder = m ?? "비우면 인원 안 셈"; };
     $("#slots").oninput = sync;
@@ -415,6 +417,14 @@ function renderNew() {
     document.querySelectorAll("[data-day]").forEach((b) => (b.onclick = () => { const i = Number(b.dataset.day); F.days = F.days.includes(i) ? F.days.filter((x) => x !== i) : [...F.days, i]; renderNew(); }));
     document.querySelectorAll("[data-sex]").forEach((b) => (b.onclick = () => { F.sex = b.dataset.sex; renderNew(); }));
 
+    $("#past").onclick = () => { NEW.pastOpen = !NEW.pastOpen; renderNew(); };
+    document.querySelectorAll("[data-past]").forEach((b) => (b.onclick = () => {
+      const j = DATA.jobs.find((x) => String(x.id) === b.dataset.past); if (!j) return;
+      NEW.pastOpen = false;
+      if (j.form) { Object.assign(F, JSON.parse(JSON.stringify(j.form))); toast(`#${j.id} 불러왔어요 — 날짜·인원만 확인하세요`); }
+      else { NEW.text = j.text; NEW.slots = ""; NEW.raw = true; toast(`#${j.id} 글을 불러왔어요 (예전 공고라 글로 고쳐요)`); }
+      renderNew();
+    }));
     $("#toRaw").onclick = () => { NEW.text = composeJob(); NEW.slots = F.count ? String(F.count) : ""; NEW.raw = true; renderNew(); };
   }
   document.querySelectorAll("[data-n]").forEach((b) => (b.onclick = () => { sync(); const k = b.dataset.n; const v = b.dataset.v; NEW[k] = v === "" ? (k === "off" ? null : "") : isNaN(Number(v)) ? v : Number(v); renderNew(); }));
@@ -438,7 +448,7 @@ function renderNew() {
     const go = async () => {
       const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
       try {
-        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "", raw: false });
         Object.assign(F, { title: "", task: "", sex: "", count: "", addr: "", days: [], wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", payType: "", payDay: "" });

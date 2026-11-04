@@ -100,6 +100,7 @@ async function jobView(job) {
     attOk: Object.values(att).filter((r) => r === "ok").length,
     attNo: Object.values(att).filter((r) => r === "no").length,
     repostOf: job.repostOf ?? null,
+    form: job.form ?? null,
   };
 }
 
@@ -223,12 +224,12 @@ const ADMIN = {
     return { count: list.length, sample: list.slice(0, 50).map(studentView) };
   },
   // 새 공고 보내기
-  async send({ text, kind, off, slots, where, filter, noInfo }) {
+  async send({ text, kind, off, slots, where, filter, form }) {
     if (!String(text ?? "").trim()) throw new Error("공고 내용을 써 주세요");
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids });
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids, form: form && typeof form === "object" ? form : null });
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },

@@ -1193,7 +1193,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEND_MAX = 150; // 1:1 한 번에 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
 
 // 관리 미니앱에서 새 공고 만들기 (글만)
-export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [] }) {
+export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [], form = null }) {
   const id = await kv.incr("jobseq");
   const m = /(\d{1,3})\s*명/.exec(text ?? "");
   const job = {
@@ -1212,6 +1212,7 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     at: Date.now(),
     slots: slots ? Number(slots) : m ? Number(m[1]) : null,
     noInfo: false, // 모든 공고 자기소개서 먼저 (11-04)
+    form, // 미니앱 칸 채우기 값 → 지난 공고 불러오기 (11-04)
   };
   await kv.set(`job:${id}`, job, JOB_TTL);
   return job;
