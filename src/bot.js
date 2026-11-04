@@ -627,6 +627,51 @@ admin.command("delete", async (ctx) => {
   return ctx.reply(`🗑 ${esc(app.name)} 학생 정보를 지웠어요.`, html);
 });
 
+// /wipeall : 학생 자기소개서 기록 전부 지우기 (11-04 대표 결정 — 모두 자기소개서 다시 받기)
+//  지우기 전에 전체 기록을 파일로 보내고 저장소에도 90일 보관 → /wipeundo 로 되돌리기 가능
+const WIPE_BACKUP = "backup:apps";
+admin.command("wipeall", async (ctx) => {
+  const ids = (await kv.smembers(K.apps)) ?? [];
+  const pend = (await kv.smembers(K.pending)) ?? [];
+  return ctx.reply(
+    `⚠️ <b>학생 기록 전부 지우기</b>\n자기소개서 ${ids.length}명 + 쓰다 만 학생 ${pend.length}명\n\n지우기 전에 전체 기록 파일을 이 대화로 보내고, 90일 동안 /wipeundo 로 되돌릴 수 있어요.\n공고·출근 기록은 그대로예요.`,
+    { ...html, reply_markup: new InlineKeyboard().text(`🗑 ${ids.length}명 전부 지우기`, "wipe:yes").row().text("취소", "wipe:no") },
+  );
+});
+admin.callbackQuery("wipe:no", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "취소했어요" });
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+});
+admin.callbackQuery("wipe:yes", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "지우는 중…" });
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  const ids = (await kv.smembers(K.apps)) ?? [];
+  const pend = (await kv.smembers(K.pending)) ?? [];
+  const apps = (await kv.mget(ids.map(K.app))).filter(Boolean);
+  const backup = { at: Date.now(), by: ctx.from.id, apps };
+  await kv.set(WIPE_BACKUP, backup, 90 * 24 * 3600);
+  await ctx.replyWithDocument(new InputFile(Buffer.from(JSON.stringify(backup, null, 1), "utf8"), `GIEC_JOB_학생기록_백업_${apps.length}명.json`), {
+    caption: `📦 지우기 전 백업 ${apps.length}명 — 되돌리려면 /wipeundo`,
+  }).catch(() => {});
+  for (const id of ids) await kv.del(K.app(id));
+  for (const id of new Set([...ids, ...pend])) await kv.del(K.state(id));
+  await kv.del(K.apps);
+  await kv.del(K.pending);
+  return ctx.reply(`🧹 학생 기록 ${apps.length}명(+ 쓰다 만 ${pend.length}명)을 지웠어요.\n이제 모든 학생은 다음 지원 때 자기소개서부터 써요.`);
+});
+admin.command("wipeundo", async (ctx) => {
+  const b = await kv.get(WIPE_BACKUP);
+  if (!b?.apps?.length) return ctx.reply("되돌릴 백업이 없어요.");
+  let n = 0;
+  for (const a of b.apps) {
+    if (await kv.get(K.app(a.id))) continue; // 그 사이 새로 쓴 학생은 새 기록 유지
+    await kv.set(K.app(a.id), a);
+    await kv.sadd(K.apps, a.id);
+    n++;
+  }
+  return ctx.reply(`↩️ ${nowKST(b.at)} 백업에서 ${n}명을 되살렸어요. (그 사이 새로 쓴 학생 ${b.apps.length - n}명은 새 기록 그대로)`);
+});
+
 admin.command("export", async (ctx) => {
   const ids = (await kv.smembers(K.apps)) ?? [];
   const apps = (await kv.mget(ids.map(K.app))).filter((a) => a && !a.test && !isAdmin(a.id)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));

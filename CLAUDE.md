@@ -19,3 +19,4 @@
 - 학생 화면 명칭 "정보" → **자기소개서** (거부감 줄이기): uz «O'zim haqimda» · ru «О себе» · ky «Өзүм жөнүндө» · en self-introduction · mn өөрийн танилцуулга · vi giới thiệu bản thân · th แนะนำตัว (칸 확인 필요).
 - 인원 다 참 = "마감" 대신 **모집 완료** (채널 공고 머리 "[모집 완료] Qabul yakunlandi · Набор завершён", 답글 "✅ 모집 완료됐습니다", jobClosed·wbClosed 모든 언어, 관리 화면 버튼·표시도).
 - 채널에서 현황판 바로 열기: 공고마다 [💼 다른 일자리 · Boshqa ishlar](모집 완료 뒤에도 남음) + 고정글 [💼 모집 중인 일] = `t.me/<봇>?startapp=jobs` → **BotFather에서 Main Mini App(= /jobs/ 주소) 켜야 작동**. 고정글은 /pinpost 다시 보내야 새 버튼.
+- (11-04 대표 결정) 학생 기록 전부 지우기 `/wipeall`(확인 버튼, 지우기 전 JSON 백업 파일 + kv backup:apps 90일) · 되돌리기 `/wipeundo`(그 사이 새로 쓴 학생은 새 기록 유지). 공고·출근 기록은 안 지움. 메뉴 목록엔 안 넣음.
