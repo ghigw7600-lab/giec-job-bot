@@ -51,9 +51,10 @@
   .stat .card { margin: 0; }
   [data-s] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   .stat b { display: block; font-size: 24px; }
-  .att { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); font-size: 16px; }
-  .att.ok.on { background: #e5f6ec; border-color: var(--ok); }
-  .att.no.on { background: #fdeaea; border-color: var(--no); }
+  .att { flex: 1; border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600; border: 1.5px solid var(--line); background: var(--bg); color: var(--text); }
+  .att.ok.on { background: #e5f6ec; border-color: var(--ok); color: #13723f; }
+  .att.no.on { background: #fdeaea; border-color: var(--no); color: var(--no); }
+  .grp { font-size: 12px; color: var(--hint, #8a9099); margin: 10px 0 4px; }
   a { color: var(--link); text-decoration: none; }
   .empty { text-align: center; color: var(--hint); padding: 40px 10px; }
   .back { border: 0; background: none; color: var(--link); font-size: 15px; padding: 0 0 10px; }
@@ -220,7 +221,7 @@ async function renderJob(id) {
         <button class="btn sm" id="repost">📢 다시 올리기</button>
       </div>
     </div>
-    <div class="row" style="margin:14px 2px 8px"><b class="sp">지원자 ${d.applicants.length}명</b>${d.applicants.length && unmarked ? `<button class="btn ghost sm" id="attall">✅ 나머지 모두 출근</button>` : ""}</div>
+    <div class="row" style="margin:14px 2px 8px"><b class="sp">지원자 ${d.applicants.length}명</b>${d.applicants.length && unmarked ? `<button class="btn sm" id="attall" title="출근·빵꾸를 아직 안 누른 지원자를 모두 출근으로">✅ 체크 안 한 사람 모두 출근</button>` : ""}</div>
     ${d.applicants.length ? d.applicants.map((a) => `
       <div class="card">
         <div class="row">
@@ -229,14 +230,20 @@ async function renderJob(id) {
             <div class="muted">${a.guest || !a.school ? `정보 없이 지원 (일당·단기)${a.username ? ` · @${esc(a.username)}` : ""}` : `${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}${a.car ? " · 🚗" : ""}`}</div>
             <div class="muted">출근 ${a.workOk} · 빵꾸 ${a.workNo} · ${ago(a.appliedAt)} 지원</div>
           </div>
-          <button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}" title="출근">✅</button>
-          <button class="att no ${a.att === "no" ? "on" : ""}" data-att="no" data-uid="${a.id}" title="빵꾸">❌</button>
         </div>
-        <div class="btns">
+        <div class="btns" style="margin-top:8px">
           <button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>
           ${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}
-          <button class="btn red sm" data-nocancel="${a.id}">🚫 직전 취소 = 빵꾸</button>
-          <button class="btn ghost sm" data-unapply="${a.id}">↩️ 그냥 취소</button>
+        </div>
+        <div class="grp">근무 당일 — 출근 체크</div>
+        <div class="row" style="gap:6px">
+          <button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}">✅ 출근함</button>
+          <button class="att no ${a.att === "no" ? "on" : ""}" data-att="no" data-uid="${a.id}">❌ 안 옴 (빵꾸)</button>
+        </div>
+        <div class="grp">근무 전 — 지원 취소</div>
+        <div class="row" style="gap:6px">
+          <button class="btn red sm" data-nocancel="${a.id}" style="flex:1">🚫 직전 취소 (빵꾸)</button>
+          <button class="btn ghost sm" data-unapply="${a.id}" style="flex:1">↩️ 그냥 취소</button>
         </div>
       </div>`).join("") : `<div class="empty">아직 지원자가 없어요</div>`}`;
   const act = async (fn, msg) => { try { haptic(); await fn(); toast(msg); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); } };
