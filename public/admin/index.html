@@ -127,7 +127,7 @@ window.addEventListener("hashchange", render);
 function renderJobs() {
   const list = DATA.jobs.filter((j) => (jobFilter === "open" ? !j.closed : jobFilter === "closed" ? j.closed : true));
   $("#view").innerHTML = `
-    <div class="chips">${[["open", "열린 공고"], ["closed", "마감"], ["all", "전체"]].map(([k, n]) => `<button class="chip ${jobFilter === k ? "on" : ""}" data-f="${k}">${n}</button>`).join("")}</div>
+    <div class="chips">${[["open", "열린 공고"], ["closed", "모집 완료"], ["all", "전체"]].map(([k, n]) => `<button class="chip ${jobFilter === k ? "on" : ""}" data-f="${k}">${n}</button>`).join("")}</div>
     ${list.length ? list.map(jobCard).join("") : `<div class="empty">공고가 없어요.<br>✍️ 새 공고 탭이나 봇의 /find 로 올려보세요.</div>`}`;
   document.querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { jobFilter = b.dataset.f; renderJobs(); }));
   document.querySelectorAll("[data-job]").forEach((c) => (c.onclick = () => (location.hash = `job=${c.dataset.job}`)));
@@ -138,7 +138,7 @@ const jobCard = (j) => `
       <span class="pill ${j.kind === "urgent" ? "urgent" : ""}">${j.kind === "urgent" ? "🚨 긴급" : "📢 일반"}</span>
       ${j.dateLabel ? `<span class="pill">📅 ${esc(j.dateLabel)}</span>` : ""}
       <span class="sp"></span>
-      <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "🔒 마감" : "모집 중"}</span>
+      <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "✅ 모집 완료" : "모집 중"}</span>
     </div>
     <div class="title" style="margin-top:6px">#${j.id} ${esc(j.title)}</div>
     <div class="muted">🙋 지원 ${j.applied}${j.slots ? ` / ${j.slots}명` : "명"}${j.attOk || j.attNo ? ` · ✅ ${j.attOk} ❌ ${j.attNo}` : ""} · ${ago(j.at)}${j.repostOf ? ` · #${j.repostOf} 다시 올림` : ""}</div>
@@ -158,12 +158,12 @@ async function renderJob(id) {
         <span class="pill ${j.kind === "urgent" ? "urgent" : ""}">${j.kind === "urgent" ? "🚨 긴급" : "📢 일반"}</span>
         ${j.dateLabel ? `<span class="pill">📅 ${esc(j.dateLabel)}</span>` : ""}
         <span class="sp"></span>
-        <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "🔒 마감" : "모집 중"}</span>
+        <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "✅ 모집 완료" : "모집 중"}</span>
       </div>
       <div class="pre">${esc(j.text)}</div>
       <div class="muted">공고 #${j.id} · 🙋 지원 ${j.applied}${j.slots ? ` / ${j.slots}명 (남은 ${left}명)` : "명"} · ${j.inGroup ? "👥 그룹방(채널)" : "📩 1:1만"}</div>
       <div class="btns">
-        ${j.closed ? `<button class="btn ghost sm" id="reopen">🔓 다시 열기</button>` : `<button class="btn red sm" id="close">🔒 마감</button>`}
+        ${j.closed ? `<button class="btn ghost sm" id="reopen">🔓 다시 열기</button>` : `<button class="btn red sm" id="close">✅ 모집 완료</button>`}
         <button class="btn sm" id="repost">📢 다시 올리기</button>
       </div>
     </div>
@@ -187,7 +187,7 @@ async function renderJob(id) {
         </div>
       </div>`).join("") : `<div class="empty">아직 지원자가 없어요</div>`}`;
   const act = async (fn, msg) => { try { haptic(); await fn(); toast(msg); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); } };
-  $("#close") && ($("#close").onclick = () => tg?.showConfirm ? tg.showConfirm("마감할까요? 그룹방 공고도 '마감'으로 바뀌어요.", (ok) => ok && act(() => api("close", { id }), "🔒 마감했어요")) : act(() => api("close", { id }), "🔒 마감했어요"));
+  $("#close") && ($("#close").onclick = () => tg?.showConfirm ? tg.showConfirm("모집 완료로 할까요? 채널 공고도 '모집 완료'로 바뀌어요.", (ok) => ok && act(() => api("close", { id }), "✅ 모집 완료했어요")) : act(() => api("close", { id }), "✅ 모집 완료했어요"));
   $("#reopen") && ($("#reopen").onclick = () => act(() => api("reopen", { id }), "🔓 다시 열었어요"));
   $("#attall") && ($("#attall").onclick = () => act(() => api("attall", { id }), "✅ 기록했어요"));
   $("#repost").onclick = () => {
@@ -195,7 +195,7 @@ async function renderJob(id) {
     const box = $("#repost").parentElement;
     box.innerHTML = `<div style="width:100%"><label class="f" style="margin-top:0">몇 명 다시 모집할까요? <span class="muted">(비우면 인원 안 셈)</span></label>
       <div class="row"><input id="rs" inputmode="numeric" value="${left ?? j.slots ?? ""}" class="sp"><button class="btn sm" id="rsGo">📢 맨 아래에 다시 올리기</button></div>
-      <div class="muted" style="margin-top:6px">새 공고가 그룹방(채널) 맨 아래에 🚨 급구로 올라가고, 이 공고는 마감돼요.</div></div>`;
+      <div class="muted" style="margin-top:6px">새 공고가 그룹방(채널) 맨 아래에 🚨 급구로 올라가고, 이 공고는 모집 완료로 바뀌어요.</div></div>`;
     $("#rsGo").onclick = () => act(async () => { const r = await api("repost", { id, slots: $("#rs").value || null }); location.hash = `job=${r.id}`; }, "📢 맨 아래에 다시 올렸어요");
   };
   document.querySelectorAll("[data-att]").forEach((b) => (b.onclick = () => { const cur = b.classList.contains("on"); act(() => api("att", { id, uid: b.dataset.uid, r: cur ? null : b.dataset.att }), cur ? "지웠어요" : b.dataset.att === "ok" ? "✅ 출근" : "❌ 빵꾸"); }));
@@ -297,9 +297,7 @@ function renderNew() {
       <input id="slots" inputmode="numeric" placeholder="${slotsAuto ?? "비우면 인원 안 셈"}" value="${esc(NEW.slots)}">
     </div>
     <div class="card">
-      <label class="f" style="margin-top:0">지원할 때</label>
-      <div class="chips">${c("noInfo", 1, "📋 정보 없이 바로 (일당·단기)")}${c("noInfo", 0, "📝 정보 받고 (장기 알바)")}</div>
-      <label class="f">보낼 곳</label>
+      <label class="f" style="margin-top:0">보낼 곳</label>
       <div class="chips">${c("where", "g", "👥 그룹방(채널)")}${c("where", "d", "📩 맞는 학생 1:1")}${c("where", "b", "👥 + 📩 둘 다")}</div>
       ${NEW.where !== "g" ? `
         <label class="f">1:1 받을 학생 조건 <span class="muted">(일하는 날 수업 없는 학생만)</span></label>
@@ -332,7 +330,7 @@ function renderNew() {
     const go = async () => {
       const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
       try {
-        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, noInfo: NEW.noInfo !== 0, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "" });
         await load(); setTab("jobs"); location.hash = `job=${r.id}`;

@@ -411,11 +411,11 @@ pm.command("start", async (ctx) => {
   const jobId = /^job_(\d+)$/.exec(payload)?.[1];
   if (jobId) {
     const job = await kv.get(`job:${jobId}`);
-    // 일당·단기 공고는 정보 없이 바로 지원 (2026-11-03 대표 결정)
-    if (app || job?.noInfo) return ctx.reply((await applyJob(ctx.api, ctx.from, jobId)).msg);
+    // 모든 공고 = 자기소개서 먼저 (2026-11-04 대표 결정, 한 번 쓴 학생은 바로 지원)
+    if (app && !app.guest) return ctx.reply((await applyJob(ctx.api, ctx.from, jobId)).msg);
     await kv.set(`wantjob:${ctx.from.id}`, Number(jobId), 7 * 24 * 3600); // 정보를 다 내면 자동으로 지원
   }
-  if (app) {
+  if (app && !app.guest) {
     return ctx.reply(tx(lang, "already"), {
       reply_markup: new InlineKeyboard().text(tx(lang, "btnAgain"), "c:again").row().text(tx(lang, "btnUpdate"), "c:go"),
     });
@@ -448,8 +448,8 @@ const HELP = [
   "/joinlink — 채널 환영 링크 (이 링크로 들어오면 봇이 인사 + 정보 받기)",
   "/pinpost — 채널에 [정보 남기기] 버튼 글 올리고 고정 (이미 있는 학생용)",
   "/refpost — 🤝 친구 소개 이벤트 포스터를 채널에 올리기 ([🎓 유학 상담] [🔗 내 소개 링크] 버튼이 붙음)",
-  "/jobs — 🛠 관리 화면 (공고별 지원자·마감·다시 올리기·출근 기록 / 학생 표 / 현황) — 입력창 왼쪽 [🛠 관리] 버튼과 같아요",
-  "/find — 공고 올리기: 🚨 긴급(오늘·내일) / 📅 일반(5일 안) → 학생 찾기 → 그룹방·1:1로 보내기 → 🔒 마감",
+  "/jobs — 🛠 관리 화면 (공고별 지원자·모집 완료·다시 올리기·출근 기록 / 학생 표 / 현황) — 입력창 왼쪽 [🛠 관리] 버튼과 같아요",
+  "/find — 공고 올리기: 🚨 긴급(오늘·내일) / 📅 일반(5일 안) → 학생 찾기 → 그룹방·1:1로 보내기 → ✅ 모집 완료",
   "/export — 지원자 전체 엑셀(CSV)",
   "/start test — 학생 화면 직접 해보기 (기록은 🧪 테스트로 표시, 엑셀에서 빠짐)",
   "/reset — 내 테스트 기록 지우기",
@@ -515,9 +515,9 @@ admin.command("pinpost", async (ctx) => {
   const text = [
     "💼 <b>GIEC JOB</b>",
     "",
-    "🇰🇷 일자리를 받으려면 봇에 정보를 남겨주세요 (1분)",
-    "🇺🇿 Ish takliflarini olish uchun botga ma'lumot qoldiring (1 daqiqa)",
-    "🇰🇬 Жумуш сунуштарын алуу үчүн ботко маалымат калтырыңыз (1 мүнөт)",
+    "🇰🇷 일자리를 받으려면 봇에 자기소개서를 남겨주세요 (1분)",
+    "🇺🇿 Ish takliflarini olish uchun botda «O'zim haqimda» ni to'ldiring (1 daqiqa)",
+    "🇰🇬 Жумуш сунуштарын алуу үчүн ботто «Өзүм жөнүндө» толтуруңуз (1 мүнөт)",
     "",
     `🤖 @${botName}`,
     "",
@@ -526,9 +526,9 @@ admin.command("pinpost", async (ctx) => {
   ].join("\n");
   const share = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("💼 GIEC JOB — Koreyada talabalar uchun ish")}`;
   const kb = new InlineKeyboard()
-    .url("📝 정보 남기기 · Ma'lumot qoldirish", `https://t.me/${botName}?start=apply`)
+    .url("📝 자기소개서 쓰기 · O'zim haqimda", `https://t.me/${botName}?start=apply`)
     .row()
-    .url("💼 모집 중인 일 · Ishlar ro'yxati", `https://t.me/${botName}?start=jobs`)
+    .url("💼 모집 중인 일 · Ishlar ro'yxati", boardLink(botName))
     .row()
     .url("📤 친구에게 보내기 · Do'stlarga yuborish", share);
   try {
@@ -812,7 +812,7 @@ const TOPIK_MIN = [["상관없음", 0], ["1급↑", 1], ["3급↑", 2], ["4급�
 const topikName = (v) => TOPIK_MIN.find((t) => t[1] === v)?.[0] ?? "상관없음";
 const mark = (on, label) => (on ? `✅ ${label}` : label);
 
-const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null, noInfo: true });
+const newFind = (kind) => ({ kind, off: kind === "urgent" ? 0 : 1, topik: 0, car: false, gender: null, noInfo: false });
 // 공고 정보 (2026-11-03 혜승 요청: 시급·시작·퇴근·근무 시간·주소는 직접 입력, 점심시간은 버튼)
 //   p.meta = { wage, start, end, hours, lunch, addr } → 공고 위에 한 줄씩 봇이 붙임
 // 급여: "11000"·"시급 11,000" → 시급 / "일당 120,000"·5만 원 넘는 숫자만 → 일당 (혜승 요청 11-04: 시급·일당 구분)
@@ -851,7 +851,6 @@ const findText = (f) =>
     `📅 일할 날: <b>${findDayLabel(f)}</b>`,
     `📝 TOPIK: <b>${topikName(f.topik)}</b>`,
     `🚻 성별: <b>${genderName(f.gender)}</b>`,
-    `📋 지원할 때: <b>${f.noInfo ? "정보 없이 바로 지원 (일당·단기)" : "학생 정보 받고 지원 (장기 알바)"}</b>`,
     "",
     "<i>시급·시간·주소는 다음 단계에서 직접 써요.</i>",
   ].join("\n");
@@ -870,7 +869,6 @@ const findKeyboard = (f) => {
   kb.row();
   GENDER.forEach(([n, v]) => kb.text(mark((f.gender ?? null) === v, n), `f:g:${v ?? "any"}`));
   kb.row().text(mark(!!f.noFlaky, "⚠️ 빵꾸 2번 이상 빼기"), `f:n:${f.noFlaky ? 0 : 1}`);
-  kb.row().text(mark(f.noInfo, "📋 정보 없이 지원 (일당·단기)"), "f:i:1").row().text(mark(!f.noInfo, "📝 정보 받고 지원 (장기 알바)"), "f:i:0");
   return kb.row().text("🔎 찾기", "f:go");
 };
 
@@ -936,7 +934,7 @@ bot.callbackQuery("f:go", async (ctx) => {
   const f = (await kv.get(findKey(ctx.from.id))) ?? newFind("urgent");
   const list = await findStudents(f);
   await kv.set(findKey(ctx.from.id), { ...f, ids: list.map((a) => a.id) }, FIND_TTL);
-  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)} · ${f.noInfo ? "정보 없이 지원" : "정보 받고 지원"}`;
+  const head = `${f.kind === "urgent" ? "🚨" : "📅"} <b>조건에 맞는 학생 ${list.length}명</b>\n${findDayLabel(f)} · TOPIK ${topikName(f.topik)} · ${genderName(f.gender)}`;
   const lines = list.slice(0, LIST_MAX).map(studentLine);
   if (list.length > LIST_MAX) lines.push(`… 외 ${list.length - LIST_MAX}명`);
   if (f.gender != null) {
@@ -1020,7 +1018,7 @@ function groupBody(job, closed = false) {
     job.kind === "urgent" ? "🚨 <b>급구 · Shoshilinch · Срочно</b>" : "<b>일자리 · Ish · Работа</b>";
   const body = job.text != null ? job.text : job.caption ?? "";
   return [
-    closed ? "<b>[마감] Yopildi · Жабылды</b>" : head,
+    closed ? "<b>[모집 완료] Qabul yakunlandi · Набор завершён</b>" : head,
     jobDate(job) ? `📅 ${jobDate(job)}` : null,
     ...jobMeta(job),
     "",
@@ -1041,7 +1039,12 @@ function dmBody(job, lang) {
     .replace(/\n{3,}/g, "\n\n");
 }
 const dmMarkup = (lang, jobId) => new InlineKeyboard().text(tx(lang, "btnJobYes"), `j:y:${jobId}`).text(tx(lang, "btnJobNo"), `j:n:${jobId}`);
-const groupMarkup = (username, jobId) => new InlineKeyboard().url("🙋 지원하기 · Ariza berish", `https://t.me/${username}?start=job_${jobId}`);
+const boardLink = (username) => `https://t.me/${username}?startapp=jobs`; // 채널에서 현황판 미니앱 바로 열기 (BotFather Main Mini App 필요)
+let meNameCache = null;
+const meName = async (api) => (meNameCache ??= (await api.getMe().catch(() => null))?.username ?? null);
+const groupMarkup = (username, jobId) =>
+  new InlineKeyboard().url("🙋 지원하기 · Ariza berish", `https://t.me/${username}?start=job_${jobId}`).row().url("💼 다른 일자리 · Boshqa ishlar", boardLink(username));
+const closedMarkup = (username) => (username ? new InlineKeyboard().url("💼 다른 일자리 · Boshqa ishlar", boardLink(username)) : { inline_keyboard: [] });
 
 async function sendTo(api, chatId, job, text, markup) {
   const opts = { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } };
@@ -1078,7 +1081,7 @@ admin.on("message", async (ctx, next) => {
     ids: f.ids ?? [],
     meta: p.meta ?? {},
     startMin: startMinutes(p.meta?.start),
-    noInfo: f.noInfo !== false,
+    noInfo: false,
     by: fullName(ctx.from),
     at: Date.now(),
   };
@@ -1099,7 +1102,7 @@ admin.on("message", async (ctx, next) => {
   }
   await ctx.reply(
     job.slots
-      ? `👥 모집 인원 <b>${job.slots}명</b> (글에서 읽었어요) — 지원이 들어올 때마다 봇이 그룹방에 "N명 남았습니다"를 달고, ${job.slots}명이 차면 자동으로 마감해요.`
+      ? `👥 모집 인원 <b>${job.slots}명</b> (글에서 읽었어요) — 지원이 들어올 때마다 봇이 그룹방에 "N명 남았습니다"를 달고, ${job.slots}명이 차면 자동으로 모집 완료돼요.`
       : `ℹ️ 글에 "4명"처럼 인원 숫자가 없어서 남은 인원은 세지 않아요. 세려면 /cancel 후 인원을 넣어 다시 보내주세요.`,
     html
   );
@@ -1119,7 +1122,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEND_MAX = 150; // 1:1 한 번에 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
 
 // 관리 미니앱에서 새 공고 만들기 (글만)
-export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [], noInfo = true }) {
+export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [] }) {
   const id = await kv.incr("jobseq");
   const m = /(\d{1,3})\s*명/.exec(text ?? "");
   const job = {
@@ -1136,7 +1139,7 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     by,
     at: Date.now(),
     slots: slots ? Number(slots) : m ? Number(m[1]) : null,
-    noInfo,
+    noInfo: false, // 모든 공고 자기소개서 먼저 (11-04)
   };
   await kv.set(`job:${id}`, job, JOB_TTL);
   return job;
@@ -1187,7 +1190,7 @@ bot.callbackQuery(/^p:send:(\d+):(g|d|b)$/, async (ctx) => {
   await ctx.answerCallbackQuery({ text: "보내는 중…" });
   await ctx.editMessageText(`📤 공고 #${job.id} 보내는 중…`).catch(() => {});
   const out = await sendJobOut(ctx.api, job, where, ctx.me.username);
-  const kb = new InlineKeyboard().text("🔒 마감 (자리 다 참)", `p:close:${job.id}`);
+  const kb = new InlineKeyboard().text("✅ 모집 완료 (자리 다 참)", `p:close:${job.id}`);
   if (adminAppUrl()) kb.row().webApp("📋 관리 화면에서 보기", adminAppUrl(`job=${job.id}`));
   await ctx.editMessageText(`✅ 공고 #${job.id}\n${out.join("\n")}\n🙋 지원한 학생은 바로 알려드릴게요.`, { reply_markup: kb }).catch(() => {});
 });
@@ -1224,9 +1227,10 @@ export async function closeJob(api, job) {
   await kv.set(`job:${job.id}`, job, JOB_TTL);
   if (!job.group) return;
   const text = groupBody(job, true);
+  const markup = closedMarkup(await meName(api));
   const edit = job.text != null
-    ? api.editMessageText(job.group.chat, job.group.msgId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } })
-    : api.editMessageCaption(job.group.chat, job.group.msgId, { caption: text.slice(0, 1024), parse_mode: "HTML", reply_markup: { inline_keyboard: [] } });
+    ? api.editMessageText(job.group.chat, job.group.msgId, text, { parse_mode: "HTML", reply_markup: markup })
+    : api.editMessageCaption(job.group.chat, job.group.msgId, { caption: text.slice(0, 1024), parse_mode: "HTML", reply_markup: markup });
   await edit.catch(() => {});
 }
 // 다시 열기 (마감 뒤 지원 취소로 자리가 생겼을 때)
@@ -1245,7 +1249,7 @@ async function postRemaining(api, job, left) {
   if (!job.group) return;
   const text = left > 0
     ? `🔔 <b>${left}명 남았습니다</b> · ${left} kishi qoldi · Осталось ${left}`
-    : "🔒 <b>마감됐습니다</b> · Yopildi · Набор закрыт";
+    : "✅ <b>모집 완료됐습니다</b> · Qabul yakunlandi · Набор завершён";
   await api
     .sendMessage(job.group.chat, text, { parse_mode: "HTML", disable_notification: true, reply_parameters: { message_id: job.group.msgId, allow_sending_without_reply: true } })
     .catch(() => {});
@@ -1256,9 +1260,9 @@ bot.callbackQuery(/^p:close:(\d+)$/, async (ctx) => {
   const job = await kv.get(`job:${ctx.match[1]}`);
   if (!job) return ctx.answerCallbackQuery({ text: "공고를 찾을 수 없어요.", show_alert: true });
   await closeJob(ctx.api, job);
-  await ctx.answerCallbackQuery({ text: "🔒 마감했어요" });
+  await ctx.answerCallbackQuery({ text: "✅ 모집 완료했어요" });
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
-  await ctx.reply(`🔒 공고 #${job.id} 마감했어요.${job.group ? " 그룹방 공고에도 '마감'이 표시됐어요." : ""}`);
+  await ctx.reply(`✅ 공고 #${job.id} 모집 완료했어요.${job.group ? " 채널 공고에도 '모집 완료'가 표시됐어요." : ""}`);
 });
 
 // 지원 접수 (1:1 버튼이든 그룹방 버튼이든 여기로) → 관리자 알림
@@ -1293,7 +1297,7 @@ export async function applyJob(api, from, jobId) {
       .sendMessage(
         a,
         [
-          `🙋 <b>공고 #${jobId} 지원</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}${left != null ? ` · ${left > 0 ? `남은 인원 ${left}명` : "🔒 다 차서 자동 마감"}` : ""}`,
+          `🙋 <b>공고 #${jobId} 지원</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}${left != null ? ` · ${left > 0 ? `남은 인원 ${left}명` : "✅ 다 차서 모집 완료"}` : ""}`,
           `└ ${esc(first)}`,
           ...who,
         ].join("\n"),

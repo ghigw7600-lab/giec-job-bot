@@ -215,7 +215,7 @@ const ADMIN = {
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids, noInfo: noInfo !== false });
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids });
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },
@@ -253,7 +253,7 @@ const STUDENT = {
   async apply({ id }) {
     const app = await kv.get(`app:${this.user.id}`);
     const job = await kv.get(`job:${Number(id)}`);
-    if (!app && !job?.noInfo) {
+    if (!app || app.guest) {
       // 정보를 아직 안 냄 → 봇으로 보내서 9단계 후 자동 지원
       return { needInfo: true, link: `https://t.me/${await botName()}?start=job_${Number(id)}` };
     }
