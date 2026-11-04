@@ -284,7 +284,7 @@ function renderStudents() {
     <div class="chips">${chip("newOnly", "🆕 신규")}${chip("m", "남")}${chip("f", "여")}${chip("t3", "TOPIK 3급↑")}${chip("star", "⭐ 성실")}${chip("flaky", "⚠️ 빵꾸")}</div>
     <div class="row" style="margin:0 2px 8px;flex-wrap:wrap"><span class="muted sp">${list.length}명${stuPick ? ` · <b>${stuSel.size}명 고름</b>` : ""}</span>
       ${stuPick
-        ? `<button class="btn ghost sm" id="selAll">${list.length && list.every((s) => stuSel.has(String(s.id))) ? "모두 풀기" : "보이는 학생 모두"}</button>`
+        ? `<button class="btn ghost sm" id="selAll">${list.length && list.every((s) => stuSel.has(String(s.id))) ? "모두 풀기" : "모두 선택"}</button>`
         : `<button class="btn ghost sm" id="pickOn">☑ 고르기</button>`}
     </div>
     ${stuPick ? "" : `<div class="muted" style="margin:-4px 2px 8px;font-size:12px">💡 학생 카드를 꾹 누르면(PC는 마우스 오른쪽 클릭) 여러 명을 골라 한꺼번에 처리할 수 있어요</div>`}
