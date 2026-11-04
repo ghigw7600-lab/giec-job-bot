@@ -125,8 +125,11 @@ function composeJob() {
   if (!d.length && time(F.wdS, F.wdE)) L.push(`🕘 근무시간: ${time(F.wdS, F.wdE)}`);
   L.push("━━━━━━━━━━━━━━", "💰 급여 조건");
   const both = wd.length && we.length;
-  if (F.wdPay) L.push(`${both ? "평일 " : ""}시급: ${won(F.wdPay)}`);
-  if (F.wePay && we.length) L.push(`주말 시급: ${won(F.wePay)}`);
+  if (F.payType === "월급제") { if (F.wdPay) L.push(`월급: ${won(F.wdPay)}`); }
+  else {
+    if (F.wdPay) L.push(`${both ? "평일 " : ""}시급: ${won(F.wdPay)}`);
+    if (F.wePay && we.length) L.push(`주말 시급: ${won(F.wePay)}`);
+  }
   if (F.payType) L.push(`급여 방식: ${F.payType}`);
   if (F.payDay.trim()) L.push(`급여 지급일: ${F.payDay.trim()}`);
   return L.join("\n");
@@ -346,10 +349,12 @@ function renderNew() {
     <div class="card">
       <label class="f" style="margin-top:0">공고 종류</label>
       <div class="chips">${c("kind", "urgent", "🚨 긴급 (오늘·내일)")}${c("kind", "normal", "📢 일반 (5일 안)")}</div>
+      <label class="f">② 급여 형태</label>
+      <div class="chips">${["시간제", "주급제", "월급제"].map((x) => `<button class="chip ${F.payType === x ? "on" : ""}" data-pt="${x}">${x}</button>`).join("")}</div>
       <label class="f">일하는 날</label>
       <div class="chips">${offs.map((o) => c("off", o, (o === 0 ? "오늘 " : o === 1 ? "내일 " : "") + kst(o))).join("")}${NEW.kind === "normal" ? c("off", "", "날짜 상관없음") : ""}</div>
     </div>
-    ${NEW.raw ? `<div class="card">
+    ${!F.payType && !NEW.raw ? `<div class="empty">② 급여 형태(시간제 · 주급제 · 월급제)를 고르면 공고 칸이 나와요</div>` : NEW.raw ? `<div class="card">
       <label class="f" style="margin-top:0">공고 글 직접 고치기 <button class="btn ghost sm" id="toForm" type="button">↩️ 칸 채우기로</button></label>
       <textarea id="text" style="min-height:320px">${esc(NEW.text)}</textarea>
       <label class="f">모집 인원 <span class="muted">${slotsAuto ? `(글에서 ${slotsAuto}명 읽음 — 바꾸려면 입력)` : "(글에 'N명'이 있으면 자동)"}</span></label>
@@ -368,11 +373,9 @@ function renderNew() {
       <div class="row" style="gap:6px"><input type="time" data-f="wdS" value="${esc(F.wdS)}"><span>~</span><input type="time" data-f="wdE" value="${esc(F.wdE)}"></div>` : ""}
       ${F.days.some((x) => x >= 5) ? `<label class="f">🕙 주말 근무시간</label>
       <div class="row" style="gap:6px"><input type="time" data-f="weS" value="${esc(F.weS)}"><span>~</span><input type="time" data-f="weE" value="${esc(F.weE)}"></div>` : ""}
-      <label class="f">💰 ${F.days.some((x) => x >= 5) && F.days.some((x) => x < 5) ? "평일 시급" : "시급"} <span class="muted">(원)</span></label><input data-f="wdPay" inputmode="numeric" placeholder="12500" value="${esc(F.wdPay)}">
-      ${F.days.some((x) => x >= 5) && F.days.some((x) => x < 5) ? `<label class="f">💰 주말 시급 <span class="muted">(원)</span></label><input data-f="wePay" inputmode="numeric" placeholder="15000" value="${esc(F.wePay)}">` : ""}
-      <label class="f">급여 방식</label>
-      <div class="chips">${["일급제", "주급제", "월급제"].map((x) => `<button class="chip ${F.payType === x ? "on" : ""}" data-pt="${x}">${x}</button>`).join("")}</div>
-      <label class="f">급여 지급일</label><input data-f="payDay" placeholder="근무 후 약 1주일 뒤 수요일 또는 금요일" value="${esc(F.payDay)}">
+      ${F.payType === "월급제" ? `<label class="f">💰 월급 <span class="muted">(원)</span></label><input data-f="wdPay" inputmode="numeric" placeholder="2500000" value="${esc(F.wdPay)}">` : `<label class="f">💰 ${F.days.some((x) => x >= 5) && F.days.some((x) => x < 5) ? "평일 시급" : "시급"} <span class="muted">(원)</span></label><input data-f="wdPay" inputmode="numeric" placeholder="12500" value="${esc(F.wdPay)}">`}
+      ${F.payType !== "월급제" && F.days.some((x) => x >= 5) && F.days.some((x) => x < 5) ? `<label class="f">💰 주말 시급 <span class="muted">(원)</span></label><input data-f="wePay" inputmode="numeric" placeholder="15000" value="${esc(F.wePay)}">` : ""}
+      <label class="f">급여 지급일</label><input data-f="payDay" placeholder="${{ 시간제: "근무 당일 / 다음 날", 주급제: "근무 후 약 1주일 뒤 수요일 또는 금요일", 월급제: "매월 10일" }[F.payType] ?? ""}" value="${esc(F.payDay)}">
     </div>
     <div class="card">
       <div class="row"><b class="sp">👀 미리보기</b><button class="btn ghost sm" id="toRaw" type="button">✏️ 글로 직접 고치기</button></div>
@@ -393,15 +396,25 @@ function renderNew() {
     if (NEW.raw) { NEW.text = $("#text").value; NEW.slots = $("#slots").value; }
     else { NEW.text = composeJob(); NEW.slots = F.count ? String(F.count) : ""; }
   };
-  if (NEW.raw) {
+  document.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => {
+    if (F.payType === "월급제" || b.dataset.pt === "월급제") F.wePay = "";
+    if (F.payType && (F.payType === "월급제") !== (b.dataset.pt === "월급제")) F.wdPay = ""; // 월급 ↔ 시급 바꾸면 금액 비움
+    F.payType = b.dataset.pt;
+    if (F.payType === "월급제" && NEW.kind === "normal") NEW.off = null; // 월급제는 보통 날짜 상관없음
+    renderNew();
+  }));
+  if (!F.payType && !NEW.raw) {
+    $("#send").disabled = true;
+  } else if (NEW.raw) {
     $("#text").oninput = () => { sync(); const m = (/(\d{1,3})\s*명/.exec(NEW.text) || [])[1]; $("#slots").placeholder = m ?? "비우면 인원 안 셈"; };
     $("#slots").oninput = sync;
     $("#toForm").onclick = () => { if (!confirm("칸 채우기로 돌아가면 직접 고친 글은 사라져요. 돌아갈까요?")) return; NEW.raw = false; renderNew(); };
   } else {
+    $("#send").disabled = false;
     document.querySelectorAll("[data-f]").forEach((el) => (el.oninput = () => { F[el.dataset.f] = el.value; $("#pv").textContent = composeJob(); }));
     document.querySelectorAll("[data-day]").forEach((b) => (b.onclick = () => { const i = Number(b.dataset.day); F.days = F.days.includes(i) ? F.days.filter((x) => x !== i) : [...F.days, i]; renderNew(); }));
     document.querySelectorAll("[data-sex]").forEach((b) => (b.onclick = () => { F.sex = b.dataset.sex; renderNew(); }));
-    document.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => { F.payType = F.payType === b.dataset.pt ? "" : b.dataset.pt; renderNew(); }));
+
     $("#toRaw").onclick = () => { NEW.text = composeJob(); NEW.slots = F.count ? String(F.count) : ""; NEW.raw = true; renderNew(); };
   }
   document.querySelectorAll("[data-n]").forEach((b) => (b.onclick = () => { sync(); const k = b.dataset.n; const v = b.dataset.v; NEW[k] = v === "" ? (k === "off" ? null : "") : isNaN(Number(v)) ? v : Number(v); renderNew(); }));
