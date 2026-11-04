@@ -69,9 +69,9 @@
   <h1>🛠 GIEC JOB 관리</h1>
   <nav id="tabs">
     <button data-t="jobs" class="on">📋 공고</button>
-    <button data-t="students">👥 학생</button>
     <button data-t="new">✍️ 새 공고</button>
     <button data-t="stats">📊 현황</button>
+    <button data-t="students">👥 학생</button>
   </nav>
 </header>
 <main id="view"><div class="skel"></div><div class="skel"></div><div class="skel"></div></main>
@@ -105,7 +105,7 @@ let stuQ = "", stuF = {};
 const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: "", noFlaky: false, text: "", slots: "", noInfo: 1, raw: false };
 // 공고 양식 칸 (11-04 혜승: 누르고 빈칸에 타이핑) → 양식 글로 자동 조립
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
-const F = { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", payType: "", payDay: "" };
+const F = { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], startDate: "", wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", payType: "", payDay: "" };
 // 시간제 근무 날짜 (달력에서 여러 날 고름, "2026-11-05")
 const todayISO = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const isoDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
@@ -363,7 +363,7 @@ function calHtml() {
   const cells = Array(first).fill("").concat([...Array(n)].map((_, i) => `${NEW.calM}-${String(i + 1).padStart(2, "0")}`));
   const cell = (iso) => {
     if (!iso) return "<span></span>";
-    const past = iso < today, on = F.dates.includes(iso);
+    const past = iso < today, on = NEW.calMode === "start" ? F.startDate === iso : F.dates.includes(iso);
     return `<button class="chip ${on ? "on" : ""}" data-cd="${iso}" ${past ? "disabled" : ""} style="margin:0;padding:8px 0;min-width:0;${past ? "opacity:.3" : ""}${iso === today && !on ? ";border:1.5px solid var(--btn)" : ""}">${Number(iso.slice(8))}</button>`;
   };
   return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center;z-index:50">
@@ -372,8 +372,11 @@ function calHtml() {
       <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:10px;text-align:center">
         ${WD.map((w) => `<span class="muted" style="font-size:12px">${w}</span>`).join("")}${cells.map(cell).join("")}
       </div>
-      <div class="muted" style="margin-top:10px">${F.dates.length ? `${F.dates.length}일 고름: ${[...F.dates].sort().map(isoDay).join(" · ")}` : "날짜를 눌러 고르세요 (여러 날 가능)"}</div>
-      <div class="btns" style="margin-top:10px"><button class="btn ghost" id="calClear" type="button">모두 풀기</button><button class="btn" id="calDone" type="button" style="flex:1">완료</button></div>
+      ${NEW.calMode === "start"
+        ? `<div class="muted" style="margin-top:10px">${F.startDate ? `첫 출근일: ${isoDay(F.startDate)}` : "첫 출근일을 눌러 고르세요"}</div>
+      <div class="btns" style="margin-top:10px"><button class="btn ghost" id="calClear" type="button">날짜 상관없음</button><button class="btn" id="calDone" type="button" style="flex:1">완료</button></div>`
+        : `<div class="muted" style="margin-top:10px">${F.dates.length ? `${F.dates.length}일 고름: ${[...F.dates].sort().map(isoDay).join(" · ")}` : "날짜를 눌러 고르세요 (여러 날 가능)"}</div>
+      <div class="btns" style="margin-top:10px"><button class="btn ghost" id="calClear" type="button">모두 풀기</button><button class="btn" id="calDone" type="button" style="flex:1">완료</button></div>`}
     </div></div>`;
 }
 function renderNew() {
@@ -388,7 +391,7 @@ function renderNew() {
       <label class="f">② 급여 형태</label>
       <div class="chips">${["시간제", "주급제", "월급제"].map((x) => `<button class="chip ${F.payType === x ? "on" : ""}" data-pt="${x}">${x}</button>`).join("")}</div>
       ${F.payType === "주급제" || F.payType === "월급제" ? `<label class="f">첫 출근일 <span class="muted">(1:1 학생 고르기·출근 확인 기준)</span></label>
-      <div class="chips">${offs.map((o) => c("off", o, (o === 0 ? "오늘 " : o === 1 ? "내일 " : "") + kst(o))).join("")}${NEW.kind === "normal" ? c("off", "", "날짜 상관없음") : ""}</div>` : ""}
+      <button class="btn ghost" id="startBtn" type="button" style="width:100%;text-align:left">📅 ${F.startDate ? isoDay(F.startDate) : "날짜 상관없음 (누르면 달력)"}</button>` : ""}
     </div>
     ${!F.payType && !NEW.raw ? `<div class="empty">② 급여 형태(시간제 · 주급제 · 월급제)를 고르면 공고 칸이 나와요<br><br><button class="btn ghost sm" id="past0" type="button">📋 지난 공고 불러오기</button></div>` : NEW.raw ? `<div class="card">
       <label class="f" style="margin-top:0">공고 글 직접 고치기 <button class="btn ghost sm" id="toForm" type="button">↩️ 칸 채우기로</button></label>
@@ -420,7 +423,7 @@ function renderNew() {
     <div class="card">
       <div class="row"><b class="sp">👀 미리보기</b><button class="btn ghost sm" id="toRaw" type="button">✏️ 글로 직접 고치기</button></div>
       <pre id="pv" style="white-space:pre-wrap;font:inherit;margin:8px 0 0">${esc(composeJob())}</pre>
-    </div>${NEW.calOpen ? calHtml() : ""}`}
+    </div>`}${NEW.calOpen ? calHtml() : ""}
     <div class="card">
       <label class="f" style="margin-top:0">보낼 곳</label>
       <div class="chips">${c("where", "g", "👥 그룹방(채널)")}${c("where", "d", "📩 맞는 학생 1:1")}${c("where", "b", "👥 + 📩 둘 다")}</div>
@@ -436,11 +439,23 @@ function renderNew() {
     if (NEW.raw) { NEW.text = $("#text").value; NEW.slots = $("#slots").value; }
     else { NEW.text = composeJob(); NEW.slots = F.count ? String(F.count) : ""; }
   };
+  // 📅 달력 (시간제 = 여러 날, 주급·월급제 첫 출근일 = 하루)
+  const openCal = (mode) => { NEW.calMode = mode; NEW.calOpen = true; NEW.calM = (mode === "start" ? F.startDate : [...F.dates].sort()[0])?.slice(0, 7) || todayISO().slice(0, 7); renderNew(); };
+  $("#calBtn") && ($("#calBtn").onclick = () => openCal("multi"));
+  $("#startBtn") && ($("#startBtn").onclick = () => openCal("start"));
+  document.querySelectorAll("[data-cd]").forEach((b) => (b.onclick = () => {
+    const v = b.dataset.cd;
+    if (NEW.calMode === "start") { F.startDate = F.startDate === v ? "" : v; NEW.calOpen = false; }
+    else F.dates = F.dates.includes(v) ? F.dates.filter((x) => x !== v) : [...F.dates, v];
+    renderNew();
+  }));
+  document.querySelectorAll("[data-cm]").forEach((b) => (b.onclick = () => { const [y, m] = NEW.calM.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + Number(b.dataset.cm), 1)); NEW.calM = d.toISOString().slice(0, 7); renderNew(); }));
+  $("#calDone") && ($("#calDone").onclick = () => { NEW.calOpen = false; renderNew(); });
+  $("#calClear") && ($("#calClear").onclick = () => { if (NEW.calMode === "start") { F.startDate = ""; NEW.calOpen = false; } else F.dates = []; renderNew(); });
   document.querySelectorAll("[data-pt]").forEach((b) => (b.onclick = () => {
     if (F.payType === "월급제" || b.dataset.pt === "월급제") F.wePay = "";
     if (F.payType && (F.payType === "월급제") !== (b.dataset.pt === "월급제")) F.wdPay = ""; // 월급 ↔ 시급 바꾸면 금액 비움
     F.payType = b.dataset.pt;
-    if (F.payType === "월급제" && NEW.kind === "normal") NEW.off = null; // 월급제는 보통 날짜 상관없음
     renderNew();
   }));
   if (!F.payType && !NEW.raw) {
@@ -456,16 +471,11 @@ function renderNew() {
     document.querySelectorAll("[data-day]").forEach((b) => (b.onclick = () => { const i = Number(b.dataset.day); F.days = F.days.includes(i) ? F.days.filter((x) => x !== i) : [...F.days, i]; renderNew(); }));
     document.querySelectorAll("[data-sex]").forEach((b) => (b.onclick = () => { F.sex = b.dataset.sex; renderNew(); }));
 
-    $("#calBtn") && ($("#calBtn").onclick = () => { NEW.calOpen = true; NEW.calM ??= todayISO().slice(0, 7); renderNew(); });
-    document.querySelectorAll("[data-cd]").forEach((b) => (b.onclick = () => { const v = b.dataset.cd; F.dates = F.dates.includes(v) ? F.dates.filter((x) => x !== v) : [...F.dates, v]; renderNew(); }));
-    document.querySelectorAll("[data-cm]").forEach((b) => (b.onclick = () => { const [y, m] = NEW.calM.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + Number(b.dataset.cm), 1)); NEW.calM = d.toISOString().slice(0, 7); renderNew(); }));
-    $("#calDone") && ($("#calDone").onclick = () => { NEW.calOpen = false; renderNew(); });
-    $("#calClear") && ($("#calClear").onclick = () => { F.dates = []; renderNew(); });
     $("#past").onclick = () => { NEW.pastOpen = !NEW.pastOpen; renderNew(); };
     document.querySelectorAll("[data-past]").forEach((b) => (b.onclick = () => {
       const j = DATA.jobs.find((x) => String(x.id) === b.dataset.past); if (!j) return;
       NEW.pastOpen = false;
-      if (j.form) { Object.assign(F, JSON.parse(JSON.stringify(j.form)), { dates: [] }); /* 시간제 날짜는 매번 새로 고름 */ toast(`#${j.id} 불러왔어요 — 날짜·인원만 확인하세요`); }
+      if (j.form) { Object.assign(F, JSON.parse(JSON.stringify(j.form)), { dates: [], startDate: "" }); /* 날짜는 매번 새로 고름 */ toast(`#${j.id} 불러왔어요 — 날짜·인원만 확인하세요`); }
       else { NEW.text = j.text; NEW.slots = ""; NEW.raw = true; toast(`#${j.id} 글을 불러왔어요 (예전 공고라 글로 고쳐요)`); }
       renderNew();
     }));
@@ -478,7 +488,7 @@ function renderNew() {
     clearTimeout(countTimer);
     countTimer = setTimeout(async () => {
       try {
-        const r = await api("count", { filter: { off: !NEW.raw && F.payType === "시간제" ? (F.dates.length ? isoOff([...F.dates].sort()[0]) : null) : NEW.off, topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("count", { filter: { off: !NEW.raw && F.payType === "시간제" ? (F.dates.length ? isoOff([...F.dates].sort()[0]) : null) : !NEW.raw && F.payType ? (F.startDate ? isoOff(F.startDate) : null) : NEW.off, topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         const el = $("#cnt"); if (!el) return;
         el.innerHTML = `📩 맞는 학생 <b>${r.count}명</b>${r.count ? `<div class="muted" style="margin-top:4px">${r.sample.slice(0, 12).map((s) => `${badge(s)}${esc(s.name)}`).join(", ")}${r.count > 12 ? " …" : ""}</div>` : ""}`;
       } catch (e) { const el = $("#cnt"); if (el) el.textContent = "⚠️ " + e.message; }
@@ -489,7 +499,7 @@ function renderNew() {
     if (!NEW.raw && F.payType === "시간제") {
       if (!F.dates.length) return toast("근무 날짜를 골라 주세요");
       NEW.off = isoOff([...F.dates].sort()[0]); // 첫 근무일 = 출근 확인·1:1 학생 고르기 기준
-    }
+    } else if (!NEW.raw && F.payType) NEW.off = F.startDate ? isoOff(F.startDate) : null; // 주급·월급제 첫 출근일
     if (!NEW.raw && !F.title.trim()) return toast("제목을 써 주세요");
     if (!NEW.text.trim()) return toast("공고 내용을 써 주세요");
     const where = { g: "그룹방(채널)에 올릴까요?", d: "맞는 학생에게 1:1로 보낼까요?", b: "그룹방에 올리고 1:1로도 보낼까요?" }[NEW.where];
@@ -499,7 +509,7 @@ function renderNew() {
         const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "", raw: false });
-        Object.assign(F, { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", payType: "", payDay: "" });
+        Object.assign(F, { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], startDate: "", wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", payType: "", payDay: "" });
         await load(); setTab("jobs"); location.hash = `job=${r.id}`;
       } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "보내기"; }
     };
