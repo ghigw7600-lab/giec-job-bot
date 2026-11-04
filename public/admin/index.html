@@ -221,7 +221,7 @@ async function renderJob(id) {
         <button class="btn sm" id="repost">📢 다시 올리기</button>
       </div>
     </div>
-    <div class="row" style="margin:14px 2px 8px"><b class="sp">지원자 ${d.applicants.length}명</b>${d.applicants.length && unmarked ? `<button class="btn sm" id="attall" title="출근·빵꾸를 아직 안 누른 지원자를 모두 출근으로">✅ 체크 안 한 사람 모두 출근</button>` : ""}</div>
+    <div class="row" style="margin:14px 2px 8px"><b class="sp">지원자 ${d.applicants.length}명</b>${d.applicants.length && unmarked ? `<button class="btn sm" id="attall" title="출근·빵꾸를 아직 안 누른 지원자를 모두 출근으로">✅ 전원 출근 완료</button>` : ""}</div>
     ${d.applicants.length ? d.applicants.map((a) => `
       <div class="card">
         <div class="row">
