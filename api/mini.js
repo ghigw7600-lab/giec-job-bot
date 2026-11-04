@@ -157,6 +157,17 @@ const ADMIN = {
     await addNoShow(uid, note, this.who);
     return { ok: true };
   },
+  // 🗑 학생 기록 지우기 (혜승 요청 11-04: 카드 안에서 한 명 / 학생 목록에서 골라서 여러 명)
+  async del({ uids }) {
+    const list = [...new Set((Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean))].slice(0, 500);
+    for (const id of list) {
+      await kv.del(`app:${id}`);
+      await kv.srem("apps", id);
+      await kv.del(`state:${id}`);
+      await kv.srem("pending", id);
+    }
+    return { ok: true, n: list.length };
+  },
   async noshowDel({ uid, at }) {
     await removeManualNoShow(uid, at);
     return { ok: true };

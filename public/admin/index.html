@@ -41,6 +41,7 @@
   .btn.ghost { background: var(--bg2); color: var(--text); }
   .btn.red { background: #fdeaea; color: var(--no); }
   .btn.sm { padding: 6px 10px; font-size: 13px; border-radius: 8px; }
+  .btn:disabled { opacity: .4; }
   .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
   input, textarea, select { width: 100%; font: inherit; color: var(--text); background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
   textarea { min-height: 130px; resize: vertical; }
@@ -209,6 +210,12 @@ async function renderJob(id) {
 }
 
 // ── 👥 학생 ──
+const stuSel = new Set();
+let stuPick = false; // ☑ 골라서 지우기 모드
+const confirmDo = (msg, fn) => (tg?.showConfirm ? tg.showConfirm(msg, (ok) => ok && fn()) : confirm(msg) && fn());
+async function delStudents(ids) {
+  try { haptic(); const r = await api("del", { uids: ids }); ids.forEach((i) => stuSel.delete(String(i))); toast(`🗑 ${r.n}명 지웠어요`); await load(); return true; } catch (e) { toast("⚠️ " + e.message); return false; }
+}
 function renderStudents() {
   const q = stuQ.trim().toLowerCase();
   let list = DATA.students.filter((s) => !q || [s.name, s.school, s.phone, s.tgName, s.username].some((v) => String(v ?? "").toLowerCase().includes(q)));
@@ -223,16 +230,30 @@ function renderStudents() {
   $("#view").innerHTML = `
     <input id="q" placeholder="이름 · 학교 · 전화 검색" value="${esc(stuQ)}" style="margin-bottom:10px">
     <div class="chips">${chip("newOnly", "🆕 신규")}${chip("m", "남")}${chip("f", "여")}${chip("t3", "TOPIK 3급↑")}${chip("star", "⭐ 성실")}${chip("flaky", "⚠️ 빵꾸")}</div>
-    <div class="muted" style="margin:0 2px 8px">${list.length}명</div>
+    <div class="row" style="margin:0 2px 8px;flex-wrap:wrap"><span class="muted sp">${list.length}명${stuPick ? ` · <b>${stuSel.size}명 고름</b>` : ""}</span>
+      ${stuPick
+        ? `<button class="btn ghost sm" id="selAll">${list.length && list.every((s) => stuSel.has(String(s.id))) ? "모두 풀기" : "보이는 학생 모두"}</button><button class="btn red sm" id="delSel" ${stuSel.size ? "" : "disabled"}>🗑 ${stuSel.size}명 지우기</button><button class="btn ghost sm" id="pickOff">닫기</button>`
+        : `<button class="btn ghost sm" id="pickOn">☑ 골라서 지우기</button>`}
+    </div>
     ${list.slice(0, 300).map((s) => `
-      <div class="card" data-s="${s.id}">
-        <div class="row"><span class="title sp">${badge(s)} ${esc(s.name)} <span class="muted">${s.gender ?? ""} ${s.age ?? ""}세</span></span><span class="pill">${STATUS[s.status] ?? ""}</span></div>
+      <div class="card" data-s="${s.id}" ${stuPick && stuSel.has(String(s.id)) ? 'style="outline:2px solid var(--no)"' : ""}>
+        <div class="row">${stuPick ? `<input type="checkbox" ${stuSel.has(String(s.id)) ? "checked" : ""} style="width:20px;height:20px;margin:0" aria-label="고르기">` : ""}<span class="title sp">${badge(s)} ${esc(s.name)} <span class="muted">${s.gender ?? ""} ${s.age ?? ""}세</span></span><span class="pill">${STATUS[s.status] ?? ""}</span></div>
         <div class="muted">${esc(s.school)} · TOPIK ${esc(s.topik)}${s.car ? " · 🚗" : ""} · 수업 ${s.days.length ? s.days.join("·") : "없음"}${s.workOk || s.workNo ? ` · 출근 ${s.workOk} 빵꾸 ${s.workNo}` : ""}</div>
       </div>`).join("") || `<div class="empty">학생이 없어요</div>`}`;
   const qi = $("#q");
   qi.oninput = () => { stuQ = qi.value; const pos = qi.selectionStart; renderStudents(); const n = $("#q"); n.focus(); n.setSelectionRange(pos, pos); };
   document.querySelectorAll("[data-sf]").forEach((b) => (b.onclick = () => { const k = b.dataset.sf; stuF[k] = !stuF[k]; if (k === "m" && stuF.m) stuF.f = false; if (k === "f" && stuF.f) stuF.m = false; renderStudents(); }));
-  document.querySelectorAll("[data-s]").forEach((c) => (c.onclick = () => (location.hash = `stu=${c.dataset.s}`)));
+  document.querySelectorAll("[data-s]").forEach((c) => (c.onclick = () => {
+    if (!stuPick) return (location.hash = `stu=${c.dataset.s}`);
+    const k = c.dataset.s; stuSel.has(k) ? stuSel.delete(k) : stuSel.add(k); renderStudents();
+  }));
+  $("#pickOn") && ($("#pickOn").onclick = () => { stuPick = true; stuSel.clear(); renderStudents(); });
+  $("#pickOff") && ($("#pickOff").onclick = () => { stuPick = false; stuSel.clear(); renderStudents(); });
+  $("#selAll") && ($("#selAll").onclick = () => { const all = list.every((s) => stuSel.has(String(s.id))); list.forEach((s) => (all ? stuSel.delete(String(s.id)) : stuSel.add(String(s.id)))); renderStudents(); });
+  $("#delSel") && ($("#delSel").onclick = () => {
+    if (!stuSel.size) return;
+    confirmDo(`고른 학생 ${stuSel.size}명의 자기소개서·기록을 지울까요? 되돌릴 수 없어요. (지운 학생은 다음 지원 때 자기소개서를 다시 써요)`, async () => { if (await delStudents([...stuSel])) { stuPick = false; renderStudents(); } });
+  });
 }
 
 function renderStudent(id) {
@@ -265,7 +286,9 @@ function renderStudent(id) {
       <textarea id="note" style="min-height:80px;margin-top:8px">${esc(s.note)}</textarea>
       <div class="btns"><button class="btn sm" id="saveNote">저장</button></div>
     </div>
-    <div class="muted" style="padding:0 4px">등록 ${new Date(s.createdAt).toLocaleDateString("ko-KR")} · 최근 ${ago(s.updatedAt)}</div>`;
+    <div class="muted" style="padding:0 4px">등록 ${new Date(s.createdAt).toLocaleDateString("ko-KR")} · 최근 ${ago(s.updatedAt)}</div>
+    <div class="btns" style="margin-top:14px"><button class="btn red" id="delStu" style="width:100%">🗑 이 학생 기록 지우기</button></div>`;
+  $("#delStu").onclick = () => confirmDo(`${s.name} 학생의 자기소개서·기록을 지울까요? 되돌릴 수 없어요. (다음 지원 때 자기소개서를 다시 써요)`, async () => { if (await delStudents([s.id])) history.back(); });
   $("#chat") && ($("#chat").onclick = (e) => { e.preventDefault(); tg?.openTelegramLink(`https://t.me/${s.username}`); });
   document.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { try { haptic(); await api("status", { uid: s.id, status: b.dataset.st }); s.status = b.dataset.st; toast(`${STATUS[s.status]}로 바꿨어요`); renderStudent(id); } catch (e) { toast("⚠️ " + e.message); } }));
   $("#addNs").onclick = async () => {
