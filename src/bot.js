@@ -1198,7 +1198,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEND_MAX = 150; // 1:1 한 번에 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
 
 // 관리 미니앱에서 새 공고 만들기 (글만)
-export async function createJobRecord({ kind = "normal", off = null, text, slots, by, ids = [], form = null }) {
+// 지원서 정원 (혜승 요청 11-05): 모집 인원과 따로 — 모집 3명이어도 지원은 10명까지 받아서 고르기·빵꾸 대비. 없으면 모집 인원까지
+export const capOf = (j) => j.cap ?? j.slots ?? null;
+export async function createJobRecord({ kind = "normal", off = null, text, slots, cap = null, by, ids = [], form = null }) {
   const id = await kv.incr("jobseq");
   const m = /(\d{1,3})\s*명/.exec(text ?? "");
   const job = {
@@ -1216,6 +1218,7 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     by,
     at: Date.now(),
     slots: slots ? Number(slots) : m ? Number(m[1]) : null,
+    cap: Number(cap) > 0 ? Number(cap) : null,
     noInfo: false, // 모든 공고 자기소개서 먼저 (11-04)
     form, // 미니앱 칸 채우기 값 → 지난 공고 불러오기 (11-04)
   };
@@ -1281,6 +1284,7 @@ export async function repostJob(api, old, username, slots) {
     id,
     kind: "urgent",
     slots: slots ?? old.slots ?? null,
+    cap: null, // 다시 올리면 남은 인원만 받음
     group: null,
     closed: false,
     att: {},
@@ -1351,16 +1355,17 @@ export async function applyJob(api, from, jobId) {
   if (!job || job.closed) return { lang, msg: tx(lang, "jobClosed") };
   if (!(await kv.setNX(`jobyes:${jobId}:${from.id}`, 1, JOB_TTL))) return { lang, msg: tx(lang, "jobYes"), already: true };
   // 인원 세기 (선착순)
-  let left = null;
-  if (job.slots) {
-    const taken = await kv.incr(`jobcnt:${jobId}`, 60 * 24 * 3600);
-    if (taken > job.slots) {
+  let left = null, taken = null;
+  const lim = capOf(job);
+  if (lim) {
+    taken = await kv.incr(`jobcnt:${jobId}`, 60 * 24 * 3600);
+    if (taken > lim) {
       // 동시에 눌러서 넘친 경우 → 되돌리고 마감 안내
       await kv.decr(`jobcnt:${jobId}`).catch(() => {});
       await kv.del(`jobyes:${jobId}:${from.id}`);
       return { lang, msg: tx(lang, "jobClosed") };
     }
-    left = job.slots - taken;
+    left = lim - taken;
     await postRemaining(api, job, left);
     if (left === 0) await closeJob(api, job);
   }
@@ -1375,7 +1380,7 @@ export async function applyJob(api, from, jobId) {
       .sendMessage(
         a,
         [
-          `🙋 <b>공고 #${jobId} 지원</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}${left != null ? ` · ${left > 0 ? `남은 인원 ${left}명` : "✅ 다 차서 모집 완료"}` : ""}`,
+          `🙋 <b>공고 #${jobId} 지원</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}${left != null ? ` · 지원 ${taken}/${lim}${job.cap && job.slots ? ` (모집 ${job.slots}명)` : ""}${left === 0 ? " · ✅ 지원 다 참" : ""}` : ""}`,
           `└ ${esc(first)}`,
           ...who,
         ].join("\n"),
@@ -1406,9 +1411,9 @@ export async function unapplyJob(api, jobId, uid, username) {
   await kv.srem(K.jobApps(jobId), uid);
   await kv.del(K.jobApp(jobId, uid));
   let left = null;
-  if (job.slots) {
+  if (capOf(job)) {
     const taken = await kv.decr(`jobcnt:${jobId}`);
-    left = Math.max(0, job.slots - Math.max(0, taken));
+    left = Math.max(0, capOf(job) - Math.max(0, taken));
     if (job.repostedTo) {
       // 이미 다시 올린 공고 → 예전 공고는 그대로 두고 기록만 정리
     } else {
@@ -1500,7 +1505,7 @@ export async function addWork(uid, { title, date, r, jobId, by }) {
   return app;
 }
 // ✏️ 공고 고치기 — 채널 공고 글도 같이 바꿈
-export async function editJob(api, id, { text, slots, form }) {
+export async function editJob(api, id, { text, slots, cap, form }) {
   const job = await kv.get(`job:${id}`);
   if (!job) throw new Error("공고를 찾을 수 없어요");
   const t = String(text ?? "").trim();
@@ -1509,6 +1514,7 @@ export async function editJob(api, id, { text, slots, form }) {
   else job.caption = t;
   const m = /(\d{1,3})\s*명/.exec(t);
   job.slots = slots ? Number(slots) : m ? Number(m[1]) : job.slots;
+  if (cap !== undefined) job.cap = Number(cap) > 0 ? Number(cap) : null;
   job.startMin = textStartMin(t) ?? job.startMin ?? null;
   if (form && typeof form === "object") job.form = form;
   job.editedAt = Date.now();

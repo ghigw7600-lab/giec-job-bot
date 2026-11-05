@@ -97,6 +97,7 @@ async function jobView(job) {
     title: first(job),
     text: job.text ?? job.caption ?? "",
     slots: job.slots,
+    cap: job.cap ?? null,
     applied: ids.length,
     closed: !!job.closed,
     at: job.at,
@@ -193,8 +194,8 @@ const ADMIN = {
     return { ok: true };
   },
   // ✏️ 공고 고치기 / 🗑 공고 지우기
-  async editJob({ id, text, slots, form }) {
-    const job = await editJob(bot.api, Number(id), { text, slots, form });
+  async editJob({ id, text, slots, cap, form }) {
+    const job = await editJob(bot.api, Number(id), { text, slots, cap: cap ?? null, form });
     return { ok: true, id: job.id };
   },
   async delJobs({ ids }) {
@@ -264,12 +265,12 @@ const ADMIN = {
     return { count: list.length, sample: list.slice(0, 50).map(studentView) };
   },
   // 새 공고 보내기
-  async send({ text, kind, off, slots, where, filter, form }) {
+  async send({ text, kind, off, slots, cap, where, filter, form }) {
     if (!String(text ?? "").trim()) throw new Error("공고 내용을 써 주세요");
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, by: this.who, ids, form: form && typeof form === "object" ? form : null });
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, by: this.who, ids, form: form && typeof form === "object" ? form : null });
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },
@@ -293,7 +294,7 @@ const STUDENT = {
     for (const j of jobs.slice(0, 50)) {
       const applied = !!(await kv.get(`jobyes:${j.id}:${this.user.id}`));
       const taken = ((await kv.smembers(`jobapps:${j.id}`)) ?? []).length;
-      list.push({ id: j.id, urgent: j.kind === "urgent", dateLabel: j.dateLabel, text: [...jobMeta(j), j.text ?? j.caption ?? ""].join("\n"), left: j.slots ? Math.max(0, j.slots - taken) : null, applied });
+      list.push({ id: j.id, urgent: j.kind === "urgent", dateLabel: j.dateLabel, text: [...jobMeta(j), j.text ?? j.caption ?? ""].join("\n"), left: (j.cap ?? j.slots) ? Math.max(0, (j.cap ?? j.slots) - taken) : null, applied });
     }
     const t = (k) => tx(lang, k);
     return {
