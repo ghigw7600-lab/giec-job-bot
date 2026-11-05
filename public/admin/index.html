@@ -61,7 +61,8 @@
   .tp input { width: 52px; text-align: center; padding-left: 4px; padding-right: 4px; }
   .tp .ap { min-width: 52px; }
   .tp .dd { padding: 6px 8px; }
-  .pop { position: absolute; top: 100%; z-index: 30; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px #0002; max-height: 220px; overflow: auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px; width: 220px; }
+  .scrolly { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .pop { position: absolute; top: 100%; z-index: 30; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px #0002; max-height: 220px; overflow: auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px; width: 220px; }
   .pop button { padding: 8px 0; border-radius: 8px; border: 0; background: var(--bg2); color: var(--text); font-size: 14px; }
   .mgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0 6px; }
   .mthumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--bg2); display: grid; place-items: center; font-size: 22px; }
@@ -96,6 +97,7 @@
 <script>
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
+try { tg?.disableVerticalSwipes?.(); } catch {} // 목록을 손가락으로 끌어 올리고 내릴 때 미니앱이 닫히지 않게
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2200); };
@@ -152,16 +154,25 @@ async function shrinkPhoto(file) {
     return await new Promise((ok) => c.toBlob((b) => ok(b ?? file), "image/jpeg", 0.85));
   } catch { return file; }
 }
+// 용량 초과 → 안내 후 봇 대화로 돌아감 (쓰던 공고는 그대로 기억, 다시 열면 새 공고 화면으로)
+function tooBig(f) {
+  try { localStorage.setItem("resumeNew", "1"); } catch {}
+  saveDraft();
+  const msg = `첨부 용량 초과 (${(f.size / 1048576).toFixed(1)}MB): 봇에게 메시지로 보내주세요.\n\n봇 대화에 보낸 뒤 관리 화면을 다시 열고 [📥 봇 대화에서 가져오기]를 누르면 이 공고에 붙어요.`;
+  if (tg?.showAlert) tg.showAlert(msg, () => tg.close());
+  else alert(msg);
+}
 async function uploadFiles(files) {
   for (const f of files) {
     const video = f.type.startsWith("video/");
     if (!video && !f.type.startsWith("image/")) continue;
     if (NEW.media.length >= 10) { toast("사진·영상은 10개까지예요"); break; }
-    if (video && f.size > VIDEO_MAX) { toast(`🎬 영상이 커요 (${(f.size / 1048576).toFixed(1)}MB) — 봇 대화창에 보낸 뒤 [📥 봇 대화에서 가져오기]를 눌러 주세요`); continue; }
+    const body = video ? f : await shrinkPhoto(f);
+    if (body.size > VIDEO_MAX) { tooBig(f); return; }
     UPLOADING++; renderNew();
     try {
-      const body = video ? f : await shrinkPhoto(f);
       const r = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/octet-stream", "x-init-data": tg?.initData ?? "", "x-kind": video ? "video" : "photo" }, body });
+      if (r.status === 413) { UPLOADING--; tooBig(f); return; }
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "올리기 실패");
       NEW.media.push({ ...j.item, url: URL.createObjectURL(f) });
@@ -500,16 +511,18 @@ function renderStudent(id) {
   for (const j of DATA.jobs ?? []) if (j.place && !places.some((p) => p.place === j.place)) places.push({ place: j.place, id: j.id, date: j.date });
   const showList = () => {
     const q = WK.place.trim().toLowerCase();
-    const m = places.filter((p) => !q || p.place.toLowerCase().includes(q)).slice(0, 8);
+    const m = places.filter((p) => !q || p.place.toLowerCase().includes(q)).slice(0, 50);
     $("#wkList").innerHTML = WK.open && m.length ? `<div class="pop" style="grid-template-columns:1fr;width:100%">${m.map((p) => `<button data-wkp="${p.id}" style="text-align:left;padding:8px 10px">#${p.id} ${esc(p.place)}${p.date ? ` <span class="muted">· ${esc(p.date.slice(5))}</span>` : ""}</button>`).join("")}</div>` : "";
-    document.querySelectorAll("[data-wkp]").forEach((b) => (b.onpointerdown = (e) => {
+    document.querySelectorAll("[data-wkp]").forEach((b) => (b.onclick = (e) => {
       e.preventDefault();
       const p = places.find((x) => String(x.id) === b.dataset.wkp); WK.place = p.place; WK.jobId = p.id; if (p.date) WK.date = p.date; WK.open = false;
       $("#wkQ").value = WK.place; $("#wkDate").value = WK.date; showList();
     }));
   };
   $("#wkQ").onfocus = () => { WK.open = true; showList(); };
-  $("#wkQ").onblur = () => setTimeout(() => { WK.open = false; showList(); }, 150);
+  // 목록은 손가락으로 끌어서 내려 보고(드래그), 누르면 고름 — 목록 밖을 누르면 닫힘
+  $("#wkList").onpointerdown = (e) => e.preventDefault(); // 목록을 만져도 검색칸 포커스 유지
+  document.onpointerdown = (e) => { if (WK.open && !e.target.closest("#wkList") && e.target.id !== "wkQ") { WK.open = false; showList(); } };
   $("#wkQ").oninput = () => { WK.place = $("#wkQ").value; WK.jobId = null; WK.open = true; showList(); };
   $("#wkDate").onchange = () => (WK.date = $("#wkDate").value);
   const addWk = async (r) => {
@@ -606,7 +619,7 @@ function renderNew() {
       <input id="cap" inputmode="numeric" placeholder="예: 10" value="${esc(NEW.cap)}">
     </div>` : `<div class="card">
       <div class="row"><b class="sp">📢 공고 칸 채우기</b><button class="btn ghost sm" id="past" type="button">📋 지난 공고 불러오기</button></div>
-      ${NEW.pastOpen ? `<div style="margin:8px 0;max-height:260px;overflow:auto">${(DATA.jobs ?? []).filter((j) => j.text).slice(0, 30).map((j) => `<button class="card" data-past="${j.id}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px"><b>#${j.id}</b> ${esc(j.title)} <span class="muted">${j.dateLabel ?? ""}${j.form ? "" : " · 글로 불러옴"}</span></button>`).join("") || `<div class="muted">지난 공고가 없어요</div>`}</div>` : ""}
+      ${NEW.pastOpen ? `<div class="scrolly" style="margin:8px 0;max-height:260px;border:1px solid var(--line);border-radius:10px;padding:6px">${(DATA.jobs ?? []).filter((j) => j.text).slice(0, 30).map((j) => `<button class="card" data-past="${j.id}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px"><b>#${j.id}</b> ${esc(j.title)} <span class="muted">${j.dateLabel ?? ""}${j.form ? "" : " · 글로 불러옴"}</span></button>`).join("") || `<div class="muted">지난 공고가 없어요</div>`}</div>` : ""}
       <label class="f">제목 <span class="muted">"… 모집!" 앞</span></label><input data-f="title" placeholder="빨래공장 여성 근로자" value="${esc(F.title)}">
       <label class="f">🧺 업무</label><input data-f="task" placeholder="세탁공장 근무" value="${esc(F.task)}">
       <label class="f">👩 모집인원</label>
@@ -803,7 +816,13 @@ function renderStats() {
     </div>`;
 }
 
-(async () => { if (await load()) render(); })();
+(async () => {
+  if (!(await load())) return;
+  let resume = false;
+  try { resume = localStorage.getItem("resumeNew") === "1"; localStorage.removeItem("resumeNew"); } catch {}
+  if (resume && !location.hash) setTab("new"); // 용량 초과로 봇 대화에 다녀옴 → 쓰던 새 공고 화면으로
+  else render();
+})();
 document.addEventListener("visibilitychange", async () => { if (!document.hidden && DATA) { await load(); render(); } });
 </script>
 </body>
