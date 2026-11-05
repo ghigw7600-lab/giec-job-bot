@@ -25,6 +25,7 @@ export const ALLOWED_UPDATES = ["message", "callback_query", "chat_join_request"
 bot.use(async (ctx, next) => {
   const id = ctx.update.update_id;
   if (id != null && !(await kv.setNX(`upd:${id}`, 1, 600).catch(() => true))) return;
+  await refreshChanAdmins(ctx.api).catch(() => {});
   await next();
   // 관리자 메뉴(입력창 / 목록)를 새 명령어로 한 번 갱신
   if (await kv.setNX("cmds:v4", 1, 365 * 24 * 3600).catch(() => false)) {
@@ -60,7 +61,34 @@ const adminIds = () =>
     .split(",")
     .map((s) => Number(s.trim()))
     .filter(Boolean);
-export const isAdmin = (id) => adminIds().includes(Number(id));
+// 채널 관리자 = 관리자 (11-05 대표 요청): 혜승이 채널에서 관리자로 올리면 그 사람도 관리 미니앱·관리 메뉴를 씀
+//  ADMIN_IDS(혜승·대표)는 항상 관리자, 채널 관리자는 5분마다 다시 확인 (내리면 빠짐). 지원 알림은 ADMIN_IDS에게만.
+let chanAdmins = new Set();
+let chanAdminsAt = 0;
+export async function refreshChanAdmins(api, force = false) {
+  if (!force && Date.now() - chanAdminsAt < 5 * 60e3) return;
+  chanAdminsAt = Date.now();
+  const ch = await kv.get("channel");
+  if (!ch?.id) return;
+  const list = await api.getChatAdministrators(ch.id).catch(() => null);
+  if (!list) return;
+  const now = new Set(list.filter((m) => !m.user.is_bot).map((m) => Number(m.user.id)));
+  chanAdmins = now;
+  const before = new Set((await kv.get("chanadmins")) ?? []);
+  const added = [...now].filter((id) => !before.has(id) && !adminIds().includes(id));
+  const removed = [...before].filter((id) => !now.has(id) && !adminIds().includes(id));
+  if (!added.length && !removed.length && before.size) return;
+  await kv.set("chanadmins", [...now]);
+  for (const id of added) {
+    await api.setMyCommands(ADMIN_COMMANDS, { scope: { type: "chat", chat_id: id } }).catch(() => {});
+    if (adminAppUrl()) await api.setChatMenuButton({ chat_id: id, menu_button: { type: "web_app", text: "🛠 관리", web_app: { url: adminAppUrl() } } }).catch(() => {});
+  }
+  for (const id of removed) {
+    await api.deleteMyCommands({ scope: { type: "chat", chat_id: id } }).catch(() => {});
+    await api.setChatMenuButton({ chat_id: id, menu_button: { type: "web_app", text: "💼 Ish", web_app: { url: boardUrl() } } }).catch(() => {});
+  }
+}
+export const isAdmin = (id) => adminIds().includes(Number(id)) || chanAdmins.has(Number(id));
 
 // ── 저장 ──
 const K = {
@@ -1120,8 +1148,23 @@ const groupMarkup = (username, jobId) =>
   new InlineKeyboard().url("🙋 지원하기", `https://t.me/${username}?start=job_${jobId}`).row().url("💼 다른 일자리 보기", boardLink(username));
 const closedMarkup = (username) => (username ? new InlineKeyboard().url("💼 다른 일자리 보기", boardLink(username)) : { inline_keyboard: [] });
 
+// 📷 사진·영상 붙은 공고 (11-05 혜승 요청): 1개 + 글 1024자 이내 → 사진 아래 글·버튼 한 장 / 여러 개 → 앨범(묶음) 먼저, 그 아래 글·버튼
+const mediaInput = (m, caption) => ({ type: m.type === "video" ? "video" : "photo", media: m.id, ...(caption ? { caption, parse_mode: "HTML" } : {}) });
 async function sendTo(api, chatId, job, text, markup) {
   const opts = { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } };
+  const media = job.media ?? [];
+  if (job.text != null && media.length === 1 && text.length <= 1024) {
+    const m = media[0];
+    const msg = await (m.type === "video" ? api.sendVideo(chatId, m.id, { caption: text, parse_mode: "HTML", reply_markup: markup }) : api.sendPhoto(chatId, m.id, { caption: text, parse_mode: "HTML", reply_markup: markup }));
+    msg.isCaption = true;
+    return msg;
+  }
+  if (job.text != null && media.length) {
+    const album = await api.sendMediaGroup(chatId, media.slice(0, 10).map((m) => mediaInput(m)));
+    const msg = await api.sendMessage(chatId, text, { ...opts, reply_parameters: { message_id: album[0].message_id, allow_sending_without_reply: true } });
+    msg.album = album.map((a) => a.message_id);
+    return msg;
+  }
   if (job.text != null) return api.sendMessage(chatId, text, opts);
   return api.copyMessage(chatId, job.from, job.msgId, { ...opts, caption: text.slice(0, 1024) });
 }
@@ -1198,9 +1241,30 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SEND_MAX = 150; // 1:1 한 번에 최대 인원 (텔레그램 속도 제한 · 서버 1분 제한)
 
 // 관리 미니앱에서 새 공고 만들기 (글만)
+// 📷 공고 사진·영상 받아 두기 (11-05 혜승 요청): 관리자가 다른 일 중이 아닐 때 봇 대화에 사진·영상을 보내면
+//  "새 공고용"으로 모아 둠 (앨범도 한 번에) → 관리 미니앱 새 공고에서 붙여서 올림
+export const mediaKey = (uid) => `mediadraft:${uid}`;
+admin.on(["message:photo", "message:video"], async (ctx) => {
+  const m = ctx.message;
+  const item = m.video ? { type: "video", id: m.video.file_id } : { type: "photo", id: m.photo.at(-1).file_id };
+  const list = ((await kv.get(mediaKey(ctx.from.id))) ?? []).concat(item).slice(-10);
+  await kv.set(mediaKey(ctx.from.id), list, 24 * 3600);
+  // 앨범은 사진마다 따로 들어옴 → 안내는 한 번만
+  if (m.media_group_id && !(await kv.setNX(`mg:${m.media_group_id}`, 1, 120))) return;
+  const kb = new InlineKeyboard();
+  if (adminAppUrl()) kb.webApp("📝 공고 칸 채우기 (사진 붙이기)", adminAppUrl("new"));
+  kb.row().text("🗑 받아 둔 사진·영상 비우기", "md:clear");
+  return ctx.reply(`📷 새 공고용으로 받아 뒀어요 (지금 ${list.length}개${m.media_group_id ? "+" : ""}, 최대 10개)\n관리 화면 ✍️ 새 공고에서 붙여서 올릴 수 있어요.`, { reply_markup: kb });
+});
+bot.callbackQuery("md:clear", async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  await kv.del(mediaKey(ctx.from.id));
+  await ctx.answerCallbackQuery({ text: "비웠어요" });
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => {});
+});
 // 지원서 정원 (혜승 요청 11-05): 모집 인원과 따로 — 모집 3명이어도 지원은 10명까지 받아서 고르기·빵꾸 대비. 없으면 모집 인원까지
 export const capOf = (j) => j.cap ?? j.slots ?? null;
-export async function createJobRecord({ kind = "normal", off = null, text, slots, cap = null, by, ids = [], form = null }) {
+export async function createJobRecord({ kind = "normal", off = null, text, slots, cap = null, by, ids = [], form = null, media = [] }) {
   const id = await kv.incr("jobseq");
   const m = /(\d{1,3})\s*명/.exec(text ?? "");
   const job = {
@@ -1221,6 +1285,7 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     cap: Number(cap) > 0 ? Number(cap) : null,
     noInfo: false, // 모든 공고 자기소개서 먼저 (11-04)
     form, // 미니앱 칸 채우기 값 → 지난 공고 불러오기 (11-04)
+    media: (Array.isArray(media) ? media : []).filter((m) => m && m.id && (m.type === "photo" || m.type === "video")).slice(0, 10),
   };
   await kv.set(`job:${id}`, job, JOB_TTL);
   return job;
@@ -1235,7 +1300,7 @@ export async function sendJobOut(api, job, where, username) {
     else {
       try {
         const msg = await sendTo(api, ch.id, job, groupBody(job), groupMarkup(username, job.id));
-        job.group = { chat: ch.id, msgId: msg.message_id };
+        job.group = { chat: ch.id, msgId: msg.message_id, ...(msg.isCaption ? { caption: true } : {}), ...(msg.album ? { album: msg.album } : {}) };
         out.push("👥 그룹방(채널)에 올렸어요");
       } catch (e) {
         out.push(`⚠️ 그룹방(채널)에 못 올렸어요: ${e.description ?? e.message}`);
@@ -1310,7 +1375,7 @@ export async function closeJob(api, job) {
   if (!job.group) return;
   const text = groupBody(job, true);
   const markup = closedMarkup(await meName(api));
-  const edit = job.text != null
+  const edit = job.text != null && !job.group.caption
     ? api.editMessageText(job.group.chat, job.group.msgId, text, { parse_mode: "HTML", reply_markup: markup })
     : api.editMessageCaption(job.group.chat, job.group.msgId, { caption: text.slice(0, 1024), parse_mode: "HTML", reply_markup: markup });
   await edit.catch(() => {});
@@ -1321,7 +1386,7 @@ export async function reopenJob(api, job, username) {
   await kv.set(`job:${job.id}`, job, JOB_TTL);
   if (!job.group) return;
   const opts = { parse_mode: "HTML", reply_markup: groupMarkup(username, job.id) };
-  const edit = job.text != null
+  const edit = job.text != null && !job.group.caption
     ? api.editMessageText(job.group.chat, job.group.msgId, groupBody(job), opts)
     : api.editMessageCaption(job.group.chat, job.group.msgId, { ...opts, caption: groupBody(job).slice(0, 1024) });
   await edit.catch(() => {});
@@ -1524,7 +1589,7 @@ export async function editJob(api, id, { text, slots, cap, form }) {
     const name = await meName(api);
     const body = groupBody(job, !!job.closed);
     const markup = job.closed ? closedMarkup(name) : groupMarkup(name, job.id);
-    const r = job.text != null
+    const r = job.text != null && !job.group.caption
       ? api.editMessageText(job.group.chat, job.group.msgId, body, { parse_mode: "HTML", reply_markup: markup, link_preview_options: { is_disabled: true } })
       : api.editMessageCaption(job.group.chat, job.group.msgId, { caption: body.slice(0, 1024), parse_mode: "HTML", reply_markup: markup });
     await r.catch((e) => { if (!/not modified/.test(e.description ?? "")) throw new Error("채널 공고를 못 고쳤어요: " + (e.description ?? e.message)); });
@@ -1537,7 +1602,10 @@ export async function deleteJobs(api, ids) {
   for (const id of ids) {
     const job = await kv.get(`job:${id}`);
     if (!job) continue;
-    if (job.group) await api.deleteMessage(job.group.chat, job.group.msgId).catch(() => {});
+    if (job.group) {
+      await api.deleteMessage(job.group.chat, job.group.msgId).catch(() => {});
+      for (const a of job.group.album ?? []) await api.deleteMessage(job.group.chat, a).catch(() => {});
+    }
     await kv.del(`job:${id}`);
     await kv.srem(K.jobs, Number(id));
     n++;

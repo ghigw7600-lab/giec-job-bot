@@ -29,6 +29,8 @@ import {
   addWork,
   editJob,
   deleteJobs,
+  refreshChanAdmins,
+  mediaKey,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -202,6 +204,16 @@ const ADMIN = {
     const list = [...new Set((Array.isArray(ids) ? ids : [ids]).map(Number).filter(Boolean))].slice(0, 200);
     return { ok: true, n: await deleteJobs(bot.api, list) };
   },
+  // 📷 봇 대화로 받아 둔 사진·영상
+  async media() {
+    return { items: (await kv.get(mediaKey(this.user.id))) ?? [] };
+  },
+  async mediaDel({ i }) {
+    const list = (await kv.get(mediaKey(this.user.id))) ?? [];
+    if (i === "all") await kv.del(mediaKey(this.user.id));
+    else { list.splice(Number(i), 1); await kv.set(mediaKey(this.user.id), list, 24 * 3600); }
+    return { ok: true };
+  },
   async del({ uids }) {
     const list = [...new Set((Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean))].slice(0, 500);
     for (const id of list) {
@@ -265,12 +277,13 @@ const ADMIN = {
     return { count: list.length, sample: list.slice(0, 50).map(studentView) };
   },
   // 새 공고 보내기
-  async send({ text, kind, off, slots, cap, where, filter, form }) {
+  async send({ text, kind, off, slots, cap, where, filter, form, withMedia }) {
     if (!String(text ?? "").trim()) throw new Error("공고 내용을 써 주세요");
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, by: this.who, ids, form: form && typeof form === "object" ? form : null });
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, media: withMedia ? (await kv.get(mediaKey(this.user.id))) ?? [] : [], by: this.who, ids, form: form && typeof form === "object" ? form : null });
+    if (withMedia) await kv.del(mediaKey(this.user.id)); // 붙인 사진·영상은 한 번 쓰면 비움
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },
@@ -328,6 +341,7 @@ export default async function handler(req, res) {
   delete args.initData;
   try {
     if (body.area === "admin") {
+      await refreshChanAdmins(bot.api).catch(() => {});
       if (!isAdmin(user.id)) return res.status(403).json({ error: "권한이 없어요" });
       const fn = ADMIN[action];
       if (!fn) return res.status(400).json({ error: "모르는 요청" });

@@ -132,6 +132,13 @@ const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const F = { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], startDate: "", wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", splitPay: false, payType: "", payDay: "" };
 const F0 = JSON.stringify(F);
+let MEDIA = []; // 봇 대화로 받아 둔 사진·영상
+async function loadMedia() { try { MEDIA = (await api("media")).items ?? []; } catch { MEDIA = []; } }
+// 쓰던 공고 칸 기억 (봇 대화로 사진 보내러 나갔다 와도 그대로)
+const DRAFT_KEY = "jobdraft";
+const saveDraft = () => { try { if (!NEW.editId) localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, at: Date.now() })); } catch {} };
+const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
+try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; } } catch {}
 // 시간제 근무 날짜 (달력에서 여러 날 고름, "2026-11-05")
 const todayISO = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const isoDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
@@ -180,9 +187,13 @@ async function load() {
 
 function setTab(t) {
   tab = t;
+  if (t === "new") setTimeout(refreshMedia, 0);
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
   render();
 }
+// 새 공고 화면을 열거나, 봇 대화(사진 보내기)에서 돌아오면 받아 둔 사진·영상 다시 불러오기
+const refreshMedia = async () => { if (tab !== "new" || location.hash.startsWith("#job") || location.hash.startsWith("#stu")) return; await loadMedia(); if (tab === "new") renderNew(); };
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshMedia(); });
 document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => { location.hash = ""; setTab(b.dataset.t); }));
 
 function render() {
@@ -194,6 +205,7 @@ function render() {
     if (k) { NEW.kind = k === "normal" ? "normal" : "urgent"; NEW.off = o === "" || o == null ? null : Number(o); }
     history.replaceState(null, "", location.pathname + location.search);
     tab = "new"; document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === "new"));
+    setTimeout(refreshMedia, 0);
   }
   ({ jobs: renderJobs, students: renderStudents, new: renderNew, stats: renderStats })[tab]();
 }
@@ -572,6 +584,13 @@ function renderNew() {
         : `<button class="btn ghost sm" id="paySplit" type="button" style="margin-top:6px">＋ 주말 시급 따로 넣기</button>`}`}
       <label class="f">급여 지급일</label><input data-f="payDay" placeholder="${{ 시간제: "근무 당일 / 다음 날", 주급제: "근무 후 약 1주일 뒤 수요일 또는 금요일", 월급제: "매월 10일" }[F.payType] ?? ""}" value="${esc(F.payDay)}">
     </div>
+    ${NEW.editId ? "" : `<div class="card">
+      <div class="row"><b class="sp">📷 사진·영상 <span class="muted" style="font-weight:400">(선택)</span></b><button class="btn ghost sm" id="mdRe" type="button">🔄 다시 확인</button></div>
+      ${MEDIA.length
+        ? `<div class="chips" style="margin-top:8px">${MEDIA.map((m, i) => `<span class="chip on" style="cursor:default">${m.type === "video" ? "🎬 영상" : "📷 사진"} ${i + 1} <a href="#" data-mdx="${i}" style="color:inherit;margin-left:4px" aria-label="빼기">✕</a></span>`).join("")}</div>
+          <div class="muted" style="font-size:12px">${MEDIA.length > 1 ? `${MEDIA.length}개를 한 묶음(앨범)으로 올리고, 그 아래에 공고 글·지원 버튼이 달려요.` : "사진 아래에 공고 글·지원 버튼이 같이 달려요."} <a href="#" id="mdAll">모두 비우기</a></div>`
+        : `<div class="muted" style="font-size:13px;margin-top:6px">이 봇 대화창에 사진·영상을 보내면 여기에 나타나요. 여러 장은 한 번에 골라서 보내면 채널에 묶음으로 올라가요. 보낸 뒤 [🔄 다시 확인]을 눌러 주세요.</div>`}
+    </div>`}
     <div class="card">
       <div class="row"><b class="sp">👀 미리보기</b><button class="btn ghost sm" id="toRaw" type="button">✏️ 글로 직접 고치기</button></div>
       <pre id="pv" style="white-space:pre-wrap;font:inherit;margin:8px 0 0">${esc(composeJob())}</pre>
@@ -608,6 +627,10 @@ function renderNew() {
     NEW.tp = part === "h" ? `${k}:m` : null; // 시 고르면 바로 분 목록
     renderNew();
   }));
+  $("#mdRe") && ($("#mdRe").onclick = async () => { await loadMedia(); toast(MEDIA.length ? `📷 ${MEDIA.length}개 있어요` : "아직 받은 사진·영상이 없어요"); renderNew(); });
+  document.querySelectorAll("[data-mdx]").forEach((a) => (a.onclick = async (e) => { e.preventDefault(); await api("mediaDel", { i: a.dataset.mdx }); await loadMedia(); renderNew(); }));
+  $("#mdAll") && ($("#mdAll").onclick = async (e) => { e.preventDefault(); await api("mediaDel", { i: "all" }); MEDIA = []; renderNew(); });
+  saveDraft();
   $("#paySplit") && ($("#paySplit").onclick = () => { F.splitPay = true; renderNew(); });
   $("#payOne") && ($("#payOne").onclick = () => { F.splitPay = false; F.wePay = ""; renderNew(); });
   $("#editCancel") && ($("#editCancel").onclick = () => { const id = NEW.editId; Object.assign(F, JSON.parse(F0)); Object.assign(NEW, { editId: null, raw: false, text: "", slots: "", cap: "" }); location.hash = `job=${id}`; });
@@ -641,7 +664,7 @@ function renderNew() {
   } else {
     $("#send").disabled = false;
     $("#capF") && ($("#capF").oninput = () => (NEW.cap = $("#capF").value.replace(/\D/g, "")));
-    document.querySelectorAll("[data-f]").forEach((el) => (el.oninput = () => { F[el.dataset.f] = el.value; $("#pv").textContent = composeJob(); }));
+    document.querySelectorAll("[data-f]").forEach((el) => (el.oninput = () => { F[el.dataset.f] = el.value; $("#pv").textContent = composeJob(); saveDraft(); }));
     document.querySelectorAll("[data-day]").forEach((b) => (b.onclick = () => { const i = Number(b.dataset.day); F.days = F.days.includes(i) ? F.days.filter((x) => x !== i) : [...F.days, i]; renderNew(); }));
     document.querySelectorAll("[data-sex]").forEach((b) => (b.onclick = () => { F.sex = b.dataset.sex; renderNew(); }));
 
@@ -693,9 +716,10 @@ function renderNew() {
     const go = async () => {
       const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
       try {
-        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, cap: NEW.cap || null, where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, cap: NEW.cap || null, withMedia: MEDIA.length > 0, where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "", cap: "", raw: false });
+        MEDIA = []; clearDraft();
         Object.assign(F, JSON.parse(F0));
         await load(); setTab("jobs"); location.hash = `job=${r.id}`;
       } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "보내기"; }
