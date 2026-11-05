@@ -226,6 +226,17 @@ function setTab(t) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
   render();
 }
+// PC: 새 공고 화면에서 Ctrl+V → 복사한 사진(카톡·캡처 등)을 그대로 붙임 (글자 붙여넣기는 그대로)
+document.addEventListener("paste", (e) => {
+  if (tab !== "new" || NEW.editId || NEW.raw && document.activeElement?.id === "text" && !(e.clipboardData?.files?.length)) return;
+  const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+  if (!files.length) return;
+  e.preventDefault();
+  uploadFiles(files);
+});
+// 화면 밖(다른 곳)에 떨어뜨려도 브라우저가 파일을 열지 않게
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => { e.preventDefault(); if (tab === "new" && !NEW.editId && e.dataTransfer?.files?.length) uploadFiles([...e.dataTransfer.files]); });
 // 새 공고 화면을 열거나, 봇 대화(사진 보내기)에서 돌아오면 받아 둔 사진·영상 다시 불러오기
 const refreshMedia = async () => { if (tab !== "new" || location.hash.startsWith("#job") || location.hash.startsWith("#stu")) return; await loadMedia(); if (tab === "new") renderNew(); };
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshMedia(); });
@@ -619,7 +630,7 @@ function renderNew() {
         : `<button class="btn ghost sm" id="paySplit" type="button" style="margin-top:6px">＋ 주말 시급 따로 넣기</button>`}`}
       <label class="f">급여 지급일</label><input data-f="payDay" placeholder="${{ 시간제: "근무 당일 / 다음 날", 주급제: "근무 후 약 1주일 뒤 수요일 또는 금요일", 월급제: "매월 10일" }[F.payType] ?? ""}" value="${esc(F.payDay)}">
     </div>
-    ${NEW.editId ? `<div class="card muted" style="font-size:13px">📷 올라간 공고의 사진·영상은 수정에서 못 바꿔요 (글·인원만 바뀌어요).</div>` : `<div class="card">
+    ${NEW.editId ? `<div class="card muted" style="font-size:13px">📷 올라간 공고의 사진·영상은 수정에서 못 바꿔요 (글·인원만 바뀌어요).</div>` : `<div class="card" id="mdBox">
       <b>📷 사진·영상 <span class="muted" style="font-weight:400">(선택 · 이 공고에만 붙어요)</span></b>
       ${NEW.media.length ? `<div class="mgrid">${NEW.media.map((m, i) => `<div class="mthumb">${m.url ? (m.type === "video" ? `<video src="${m.url}" muted playsinline></video>` : `<img src="${m.url}" alt="">`) : `<span>${m.type === "video" ? "🎬" : "📷"}</span>`}${m.type === "video" ? `<b class="mtag">영상</b>` : ""}<button type="button" data-mdx="${i}" aria-label="빼기">✕</button></div>`).join("")}</div>
         <div class="muted" style="font-size:12px">${NEW.media.length > 1 ? `${NEW.media.length}개가 한 묶음(앨범)으로 올라가고, 그 아래에 공고 글·지원 버튼이 달려요.` : "사진 아래에 공고 글·지원 버튼이 같이 달려요."}</div>` : ""}
@@ -628,7 +639,7 @@ function renderNew() {
         <label class="btn ghost" style="flex:1;text-align:center;cursor:pointer">＋ 사진·영상 추가<input id="mdFile" type="file" accept="image/*,video/*" multiple hidden></label>
         ${POOL ? `<button class="btn ghost" id="mdTake" type="button">📥 봇 대화에서 가져오기 (${POOL})</button>` : ""}
       </div>
-      <div class="muted" style="font-size:12px;margin-top:6px">여러 장은 한 번에 골라도 돼요. 4MB가 넘는 긴 영상은 봇 대화창에 보낸 뒤 [📥 봇 대화에서 가져오기]로 붙여요.</div>
+      <div class="muted" style="font-size:12px;margin-top:6px">PC: 카톡 등에서 사진을 복사해 <b>Ctrl+V</b> 하거나, 이 칸으로 <b>끌어다 놓아도</b> 돼요. 여러 장은 한 번에 골라도 돼요. 4MB가 넘는 긴 영상은 봇 대화창에 보낸 뒤 [📥 봇 대화에서 가져오기]로 붙여요.</div>
     </div>`}
     <div class="card">
       <div class="row"><b class="sp">👀 미리보기</b><button class="btn ghost sm" id="toRaw" type="button">✏️ 글로 직접 고치기</button></div>
@@ -667,6 +678,13 @@ function renderNew() {
     renderNew();
   }));
   $("#mdFile") && ($("#mdFile").onchange = (e) => uploadFiles([...e.target.files]));
+  // PC: 끌어다 놓기 (사진 칸 위에서 점선 표시)
+  const box = $("#mdBox");
+  if (box) {
+    box.ondragover = (e) => { e.preventDefault(); box.style.outline = "2px dashed var(--btn)"; };
+    box.ondragleave = () => (box.style.outline = "");
+    box.ondrop = (e) => { e.preventDefault(); e.stopPropagation(); box.style.outline = ""; uploadFiles([...(e.dataTransfer?.files ?? [])]); };
+  }
   document.querySelectorAll("[data-mdx]").forEach((b) => (b.onclick = () => { NEW.media.splice(Number(b.dataset.mdx), 1); saveDraft(); renderNew(); }));
   $("#mdTake") && ($("#mdTake").onclick = async () => { try { const r = await api("mediaTake"); NEW.media.push(...r.items.slice(0, 10 - NEW.media.length)); POOL = 0; saveDraft(); toast(`📥 ${r.items.length}개 붙였어요`); renderNew(); } catch (e) { toast("⚠️ " + e.message); } });
   saveDraft();
