@@ -103,6 +103,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2200); };
 const haptic = () => tg?.HapticFeedback?.impactOccurred?.("light");
 
+// 이미 올라간 사진(텔레그램 file_id) 작은 그림 — /api/file이 관리자 확인 후 대신 가져옴
+const fileUrl = (id) => `/api/file?id=${encodeURIComponent(id)}&i=${encodeURIComponent(tg?.initData ?? "")}`;
 async function api(action, args = {}) {
   const r = await fetch("/api/mini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ area: "admin", action, initData: tg?.initData ?? "", ...args }) });
   const j = await r.json().catch(() => ({}));
@@ -182,9 +184,19 @@ async function uploadFiles(files) {
 }
 // 쓰던 공고 칸 기억 (봇 대화로 사진 보내러 나갔다 와도 그대로)
 const DRAFT_KEY = "jobdraft";
-const saveDraft = () => { try { if (!NEW.editId) localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, media: NEW.media.map(({ type, id }) => ({ type, id })), at: Date.now() })); } catch {} };
+const EDIT_KEY = "jobeditdraft"; // 공고 수정 중 용량 초과로 봇 대화에 다녀올 때
+const saveDraft = () => { try {
+  const media = NEW.media.map(({ type, id }) => ({ type, id }));
+  if (NEW.editId) localStorage.setItem(EDIT_KEY, JSON.stringify({ editId: NEW.editId, kind: NEW.kind, raw: NEW.raw, text: NEW.text, slots: NEW.slots, cap: NEW.cap, F, media, at: Date.now() }));
+  else localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, media, at: Date.now() }));
+} catch {} };
 const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
-try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; NEW.media = d.media ?? []; } } catch {}
+// 새 공고 쓰던 것 불러오기 (수정을 마치거나 그만둘 때도 다시 불러옴)
+function loadNewDraft() {
+  NEW.media = []; NEW.cap = "";
+  try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; NEW.media = d.media ?? []; } } catch {}
+}
+loadNewDraft();
 // 시간제 근무 날짜 (달력에서 여러 날 고름, "2026-11-05")
 const todayISO = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const isoDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
@@ -239,7 +251,7 @@ function setTab(t) {
 }
 // PC: 새 공고 화면에서 Ctrl+V → 복사한 사진(카톡·캡처 등)을 그대로 붙임 (글자 붙여넣기는 그대로)
 document.addEventListener("paste", (e) => {
-  if (tab !== "new" || NEW.editId || NEW.raw && document.activeElement?.id === "text" && !(e.clipboardData?.files?.length)) return;
+  if (tab !== "new" || NEW.editId && NEW.noMedia || NEW.raw && document.activeElement?.id === "text" && !(e.clipboardData?.files?.length)) return;
   const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
   if (!files.length) return;
   e.preventDefault();
@@ -247,7 +259,7 @@ document.addEventListener("paste", (e) => {
 });
 // 화면 밖(다른 곳)에 떨어뜨려도 브라우저가 파일을 열지 않게
 window.addEventListener("dragover", (e) => e.preventDefault());
-window.addEventListener("drop", (e) => { e.preventDefault(); if (tab === "new" && !NEW.editId && e.dataTransfer?.files?.length) uploadFiles([...e.dataTransfer.files]); });
+window.addEventListener("drop", (e) => { e.preventDefault(); if (tab === "new" && !(NEW.editId && NEW.noMedia) && e.dataTransfer?.files?.length) uploadFiles([...e.dataTransfer.files]); });
 // 새 공고 화면을 열거나, 봇 대화(사진 보내기)에서 돌아오면 받아 둔 사진·영상 다시 불러오기
 const refreshMedia = async () => { if (tab !== "new" || location.hash.startsWith("#job") || location.hash.startsWith("#stu")) return; await loadMedia(); if (tab === "new") renderNew(); };
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshMedia(); });
@@ -590,10 +602,16 @@ const timeRange = (a, b) => `<div style="display:grid;gap:6px"><div class="row" 
 // ✏️ 공고 수정 — 새 공고 화면을 그 공고 내용으로 채워서 엶
 function startEdit(j) {
   Object.assign(F, JSON.parse(F0));
-  Object.assign(NEW, { editId: j.id, kind: j.kind, raw: !j.form, text: j.text, slots: j.slots ?? "", cap: j.cap ?? "", pastOpen: false, calOpen: false, tp: null });
+  Object.assign(NEW, { editId: j.id, kind: j.kind, raw: !j.form, text: j.text, slots: j.slots ?? "", cap: j.cap ?? "", pastOpen: false, calOpen: false, tp: null, noMedia: j.textJob === false, media: (j.media ?? []).map(({ type, id }) => ({ type, id })) });
+  try { localStorage.removeItem(EDIT_KEY); } catch {}
   if (j.form) Object.assign(F, JSON.parse(JSON.stringify(j.form)));
   if (F.wePay) F.splitPay = true;
   location.hash = ""; setTab("new");
+}
+function endEdit() {
+  Object.assign(F, JSON.parse(F0)); Object.assign(NEW, { editId: null, noMedia: false, raw: false, text: "", slots: "" });
+  try { localStorage.removeItem(EDIT_KEY); } catch {}
+  loadNewDraft();
 }
 function renderNew() {
   const offs = NEW.kind === "urgent" ? [0, 1] : [0, 1, 2, 3, 4, 5];
@@ -643,9 +661,10 @@ function renderNew() {
         : `<button class="btn ghost sm" id="paySplit" type="button" style="margin-top:6px">＋ 주말 시급 따로 넣기</button>`}`}
       <label class="f">급여 지급일</label><input data-f="payDay" placeholder="${{ 시간제: "근무 당일 / 다음 날", 주급제: "근무 후 약 1주일 뒤 수요일 또는 금요일", 월급제: "매월 10일" }[F.payType] ?? ""}" value="${esc(F.payDay)}">
     </div>
-    ${NEW.editId ? `<div class="card muted" style="font-size:13px">📷 올라간 공고의 사진·영상은 수정에서 못 바꿔요 (글·인원만 바뀌어요).</div>` : `<div class="card" id="mdBox">
+    ${NEW.editId && NEW.noMedia ? `<div class="card muted" style="font-size:13px">📷 예전 방식(봇 대화로 사진과 함께 보낸) 공고라 사진·영상은 여기서 못 바꿔요.</div>` : `<div class="card" id="mdBox">
       <b>📷 사진·영상 <span class="muted" style="font-weight:400">(선택 · 이 공고에만 붙어요)</span></b>
-      ${NEW.media.length ? `<div class="mgrid">${NEW.media.map((m, i) => `<div class="mthumb">${m.url ? (m.type === "video" ? `<video src="${m.url}" muted playsinline></video>` : `<img src="${m.url}" alt="">`) : `<span>${m.type === "video" ? "🎬" : "📷"}</span>`}${m.type === "video" ? `<b class="mtag">영상</b>` : ""}<button type="button" data-mdx="${i}" aria-label="빼기">✕</button></div>`).join("")}</div>
+      ${NEW.editId ? `<div class="muted" style="font-size:12px;margin-top:4px">✕로 빼고 ＋로 더하면 돼요. 사진·영상을 바꾸면 채널 공고가 <b>새 글로 다시 올라가요</b>(맨 아래로, 예전 글은 지워짐). 지원자 기록은 그대로예요.</div>` : ""}
+      ${NEW.media.length ? `<div class="mgrid">${NEW.media.map((m, i) => `<div class="mthumb">${m.url ? (m.type === "video" ? `<video src="${m.url}" muted playsinline></video>` : `<img src="${m.url}" alt="">`) : m.type === "photo" ? `<img src="${fileUrl(m.id)}" alt="" loading="lazy" onerror="this.outerHTML='<span>📷</span>'">` : `<span>🎬</span>`}${m.type === "video" ? `<b class="mtag">영상</b>` : ""}<button type="button" data-mdx="${i}" aria-label="빼기">✕</button></div>`).join("")}</div>
         <div class="muted" style="font-size:12px">${NEW.media.length > 1 ? `${NEW.media.length}개가 한 묶음(앨범)으로 올라가고, 그 아래에 공고 글·지원 버튼이 달려요.` : "사진 아래에 공고 글·지원 버튼이 같이 달려요."}</div>` : ""}
       ${UPLOADING ? `<div class="muted" style="margin-top:6px">⏳ 올리는 중… (${UPLOADING})</div>` : ""}
       <div class="btns" style="margin-top:8px">
@@ -703,7 +722,7 @@ function renderNew() {
   saveDraft();
   $("#paySplit") && ($("#paySplit").onclick = () => { F.splitPay = true; renderNew(); });
   $("#payOne") && ($("#payOne").onclick = () => { F.splitPay = false; F.wePay = ""; renderNew(); });
-  $("#editCancel") && ($("#editCancel").onclick = () => { const id = NEW.editId; Object.assign(F, JSON.parse(F0)); Object.assign(NEW, { editId: null, raw: false, text: "", slots: "", cap: "" }); location.hash = `job=${id}`; });
+  $("#editCancel") && ($("#editCancel").onclick = () => { const id = NEW.editId; endEdit(); location.hash = `job=${id}`; });
   // 📅 달력 (시간제 = 여러 날, 주급·월급제 첫 출근일 = 하루)
   const openCal = (mode) => { NEW.calMode = mode; NEW.calOpen = true; NEW.calM = (mode === "start" ? F.startDate : [...F.dates].sort()[0])?.slice(0, 7) || todayISO().slice(0, 7); renderNew(); };
   $("#calBtn") && ($("#calBtn").onclick = () => openCal("multi"));
@@ -774,12 +793,14 @@ function renderNew() {
     if (NEW.cap && NEW.slots && Number(NEW.cap) < Number(NEW.slots)) return toast("지원서 정원은 모집인원보다 같거나 많아야 해요");
     if (NEW.editId) {
       const id = NEW.editId;
-      return confirmDo(`공고 #${id}를 이 내용으로 고칠까요? 채널 공고 글도 바뀌어요.`, async () => {
+      const before = JSON.stringify((DATA.jobs.find((x) => x.id === id)?.media ?? []).map((m) => m.id));
+      const mediaMoved = !NEW.noMedia && before !== JSON.stringify(NEW.media.map((m) => m.id));
+      return confirmDo(mediaMoved ? `공고 #${id}를 고칠까요?\n사진·영상이 바뀌어서 채널 공고를 새 글로 다시 올리고, 예전 글은 지워요.` : `공고 #${id}를 이 내용으로 고칠까요? 채널 공고 글도 바뀌어요.`, async () => {
         const btn = $("#send"); btn.disabled = true; btn.textContent = "저장 중…";
         try {
-          await api("editJob", { id, text: NEW.text, slots: NEW.slots || null, cap: NEW.cap || null, form: NEW.raw ? null : { ...F } });
+          await api("editJob", { id, text: NEW.text, slots: NEW.slots || null, cap: NEW.cap || null, form: NEW.raw ? null : { ...F }, media: NEW.noMedia ? undefined : NEW.media.map(({ type, id }) => ({ type, id })) });
           toast("💾 공고를 고쳤어요");
-          Object.assign(F, JSON.parse(F0)); Object.assign(NEW, { editId: null, raw: false, text: "", slots: "", cap: "" });
+          endEdit();
           await load(); setTab("jobs"); location.hash = `job=${id}`;
         } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "💾 수정 저장"; }
       });
@@ -820,7 +841,13 @@ function renderStats() {
   if (!(await load())) return;
   let resume = false;
   try { resume = localStorage.getItem("resumeNew") === "1"; localStorage.removeItem("resumeNew"); } catch {}
-  if (resume && !location.hash) setTab("new"); // 용량 초과로 봇 대화에 다녀옴 → 쓰던 새 공고 화면으로
+  let ed = null;
+  try { ed = JSON.parse(localStorage.getItem(EDIT_KEY) || "null"); } catch {}
+  if (resume && ed && Date.now() - ed.at < 24 * 3600e3 && DATA.jobs.some((x) => x.id === ed.editId)) { // 공고 수정 중이었으면 수정 화면 그대로
+    Object.assign(F, JSON.parse(F0), ed.F);
+    Object.assign(NEW, { editId: ed.editId, kind: ed.kind, raw: ed.raw, text: ed.text, slots: ed.slots, cap: ed.cap, media: ed.media ?? [], noMedia: false, pastOpen: false, calOpen: false, tp: null });
+    setTab("new");
+  } else if (resume && !location.hash) setTab("new"); // 용량 초과로 봇 대화에 다녀옴 → 쓰던 새 공고 화면으로
   else render();
 })();
 document.addEventListener("visibilitychange", async () => { if (!document.hidden && DATA) { await load(); render(); } });

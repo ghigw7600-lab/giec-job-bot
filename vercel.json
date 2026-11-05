@@ -11,6 +11,9 @@
     },
     "api/upload.js": {
       "maxDuration": 60
+    },
+    "api/file.js": {
+      "maxDuration": 30
     }
   },
   "crons": [

@@ -110,6 +110,7 @@ async function jobView(job) {
     repostOf: job.repostOf ?? null,
     form: job.form ?? null,
     media: job.media ?? [],
+    textJob: job.text != null, // 글로 만든 공고만 사진·영상을 바꿀 수 있음
     kindPay: job.form?.payType ?? null,
     place: job.form?.title ?? first(job).replace(/^📢\s*\[GIEC JOB\]\s*/, "").replace(/\s*모집!?\s*$/, ""),
     off: job.off ?? null,
@@ -197,8 +198,8 @@ const ADMIN = {
     return { ok: true };
   },
   // ✏️ 공고 고치기 / 🗑 공고 지우기
-  async editJob({ id, text, slots, cap, form }) {
-    const job = await editJob(bot.api, Number(id), { text, slots, cap: cap ?? null, form });
+  async editJob({ id, text, slots, cap, form, media }) {
+    const job = await editJob(bot.api, Number(id), { text, slots, cap: cap ?? null, form, media });
     return { ok: true, id: job.id };
   },
   async delJobs({ ids }) {

@@ -1576,7 +1576,7 @@ export async function addWork(uid, { title, date, r, jobId, by }) {
   return app;
 }
 // ✏️ 공고 고치기 — 채널 공고 글도 같이 바꿈
-export async function editJob(api, id, { text, slots, cap, form }) {
+export async function editJob(api, id, { text, slots, cap, form, media }) {
   const job = await kv.get(`job:${id}`);
   if (!job) throw new Error("공고를 찾을 수 없어요");
   const t = String(text ?? "").trim();
@@ -1588,7 +1588,26 @@ export async function editJob(api, id, { text, slots, cap, form }) {
   if (cap !== undefined) job.cap = Number(cap) > 0 ? Number(cap) : null;
   job.startMin = textStartMin(t) ?? job.startMin ?? null;
   if (form && typeof form === "object") job.form = form;
+  // 📷 사진·영상 바꾸기 (11-05 대표 요청) — 글로 만든 공고만. 바뀌면 채널 공고를 새로 올리고 예전 글·앨범은 지움
+  let mediaChanged = false;
+  if (Array.isArray(media) && job.text != null) {
+    const nm = media.filter((m) => m && typeof m.id === "string" && (m.type === "photo" || m.type === "video")).slice(0, 10).map((m) => ({ type: m.type, id: m.id }));
+    if (JSON.stringify(nm.map((m) => m.id)) !== JSON.stringify((job.media ?? []).map((m) => m.id))) { job.media = nm; mediaChanged = true; }
+  }
   job.editedAt = Date.now();
+  if (job.group && mediaChanged) {
+    const name = await meName(api);
+    const old = job.group;
+    let msg;
+    try {
+      msg = await sendTo(api, old.chat, job, groupBody(job, !!job.closed), job.closed ? closedMarkup(name) : groupMarkup(name, job.id));
+    } catch (e) { throw new Error("채널에 새 공고를 못 올렸어요: " + (e.description ?? e.message)); }
+    job.group = { chat: old.chat, msgId: msg.message_id, ...(msg.isCaption ? { caption: true } : {}), ...(msg.album ? { album: msg.album } : {}) };
+    await kv.set(`job:${id}`, job, JOB_TTL);
+    await api.deleteMessage(old.chat, old.msgId).catch(() => {});
+    for (const a of old.album ?? []) await api.deleteMessage(old.chat, a).catch(() => {});
+    return job;
+  }
   await kv.set(`job:${id}`, job, JOB_TTL);
   if (job.group) {
     const name = await meName(api);
