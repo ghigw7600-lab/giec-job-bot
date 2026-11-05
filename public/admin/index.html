@@ -156,11 +156,11 @@ async function shrinkPhoto(file) {
 }
 // 용량 초과 → 안내 후 봇 대화로 돌아감 (쓰던 공고는 그대로 기억, 다시 열면 새 공고 화면으로)
 function tooBig(f) {
-  try { localStorage.setItem("resumeNew", "1"); } catch {}
   saveDraft();
-  const msg = `첨부 용량 초과 (${(f.size / 1048576).toFixed(1)}MB): 봇에게 메시지로 보내주세요.\n\n봇 대화에 보낸 뒤 관리 화면을 다시 열고 [📥 봇 대화에서 가져오기]를 누르면 이 공고에 붙어요.`;
-  if (tg?.showAlert) tg.showAlert(msg, () => tg.close());
-  else alert(msg);
+  const msg = `첨부 용량 초과 (${(f.size / 1048576).toFixed(1)}MB): 봇에게 메시지로 보내주세요.\n\n[확인] 봇 대화로 가기 · [취소] 이 화면에 그대로 있기\n봇 대화에 보낸 뒤 관리 화면을 다시 열고 [📥 봇 대화에서 가져오기]를 누르면 이 공고에 붙어요.`;
+  const go = () => { try { localStorage.setItem("resumeNew", "1"); } catch {} tg?.close(); };
+  if (tg?.showConfirm) tg.showConfirm(msg, (ok) => ok && go());
+  else if (confirm(msg)) go();
 }
 async function uploadFiles(files) {
   for (const f of files) {
@@ -619,7 +619,7 @@ function renderNew() {
       <input id="cap" inputmode="numeric" placeholder="예: 10" value="${esc(NEW.cap)}">
     </div>` : `<div class="card">
       <div class="row"><b class="sp">📢 공고 칸 채우기</b><button class="btn ghost sm" id="past" type="button">📋 지난 공고 불러오기</button></div>
-      ${NEW.pastOpen ? `<div class="scrolly" style="margin:8px 0;max-height:260px;border:1px solid var(--line);border-radius:10px;padding:6px">${(DATA.jobs ?? []).filter((j) => j.text).slice(0, 30).map((j) => `<button class="card" data-past="${j.id}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px"><b>#${j.id}</b> ${esc(j.title)} <span class="muted">${j.dateLabel ?? ""}${j.form ? "" : " · 글로 불러옴"}</span></button>`).join("") || `<div class="muted">지난 공고가 없어요</div>`}</div>` : ""}
+      ${NEW.pastOpen ? `<div class="scrolly" style="margin:8px 0;max-height:260px;border:1px solid var(--line);border-radius:10px;padding:6px">${(DATA.jobs ?? []).filter((j) => j.text).slice(0, 30).map((j) => `<button class="card" data-past="${j.id}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px;color:var(--text);border:1px solid var(--line);font:inherit"><b>#${j.id}</b> ${esc(j.title)} <span class="muted">${j.dateLabel ?? ""}${j.form ? "" : " · 글로 불러옴"}</span></button>`).join("") || `<div class="muted">지난 공고가 없어요</div>`}</div>` : ""}
       <label class="f">제목 <span class="muted">"… 모집!" 앞</span></label><input data-f="title" placeholder="빨래공장 여성 근로자" value="${esc(F.title)}">
       <label class="f">🧺 업무</label><input data-f="task" placeholder="세탁공장 근무" value="${esc(F.task)}">
       <label class="f">👩 모집인원</label>
