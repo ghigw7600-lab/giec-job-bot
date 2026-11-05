@@ -89,6 +89,11 @@ export async function refreshChanAdmins(api, force = false) {
   }
 }
 export const isAdmin = (id) => adminIds().includes(Number(id)) || chanAdmins.has(Number(id));
+// 알림 받는 사람 = ADMIN_IDS + 채널 관리자(대표 포함) (11-05: 대표에게 지원 알림이 안 오던 것 고침)
+export async function notifyIds(api) {
+  await refreshChanAdmins(api).catch(() => {});
+  return [...new Set([...adminIds(), ...chanAdmins])];
+}
 
 // ── 저장 ──
 const K = {
@@ -341,7 +346,7 @@ const cardKeyboardBase = (id) =>
     .webApp("📋 관리 화면에서 보기", adminAppUrl(`stu=${id}`) ?? "https://t.me");
 
 async function notifyAdmins(api, app, title) {
-  for (const admin of adminIds()) {
+  for (const admin of await notifyIds(api)) {
     await api
       .sendMessage(admin, cardText(app, title), { ...html, reply_markup: cardKeyboard(app.id), link_preview_options: { is_disabled: true } })
       .catch((e) => console.error(`카드 전송 실패(${admin}):`, e.description ?? e.message));
@@ -1252,9 +1257,9 @@ admin.on(["message:photo", "message:video"], async (ctx) => {
   // 앨범은 사진마다 따로 들어옴 → 안내는 한 번만
   if (m.media_group_id && !(await kv.setNX(`mg:${m.media_group_id}`, 1, 120))) return;
   const kb = new InlineKeyboard();
-  if (adminAppUrl()) kb.webApp("📝 공고 칸 채우기 (사진 붙이기)", adminAppUrl("new"));
-  kb.row().text("🗑 받아 둔 사진·영상 비우기", "md:clear");
-  return ctx.reply(`📷 새 공고용으로 받아 뒀어요 (지금 ${list.length}개${m.media_group_id ? "+" : ""}, 최대 10개)\n관리 화면 ✍️ 새 공고에서 붙여서 올릴 수 있어요.`, { reply_markup: kb });
+  if (adminAppUrl()) kb.webApp("📝 새 공고 화면 열기", adminAppUrl("new"));
+  kb.row().text("🗑 임시함 비우기", "md:clear");
+  return ctx.reply(`📥 임시함에 받아 뒀어요 (지금 ${list.length}개${m.media_group_id ? "+" : ""})\n새 공고 화면에서 [📥 봇 대화에서 가져오기]를 누르면 그 공고에만 붙고 임시함은 비워져요.\n(사진·짧은 영상은 새 공고 화면 [＋ 사진·영상 추가]로 바로 올려도 돼요)`, { reply_markup: kb });
 });
 bot.callbackQuery("md:clear", async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
@@ -1441,7 +1446,7 @@ export async function applyJob(api, from, jobId) {
     ? [`👤 <a href="tg://user?id=${app.id}">${esc(app.name)}</a> · ${esc(app.age)}`, `📞 ${app.phone ? `<code>${esc(app.phone)}</code>` : "한국 번호 없음"}`, `🏫 ${esc(app.school)} · TOPIK ${KO.topik[app.topik] ?? "-"}`, `📅 수업: ${dayText(app.days)}`]
     : [`👤 <a href="tg://user?id=${from.id}">${esc(fullName(from))}</a>${from.username ? ` (@${esc(from.username)})` : ""} · 정보 없음 (일당·단기 지원)`];
   const first = (job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40);
-  for (const a of adminIds()) {
+  for (const a of await notifyIds(api)) {
     await api
       .sendMessage(
         a,
@@ -1661,7 +1666,7 @@ const attKeyboard = (job, apps) => {
 async function askAttendance(api, job) {
   const apps = await jobApplicants(job.id);
   if (!apps.length) return false;
-  for (const a of adminIds()) {
+  for (const a of await notifyIds(api)) {
     await api.sendMessage(a, attText(job, apps), { ...html, reply_markup: attKeyboard(job, apps) }).catch(() => {});
   }
   return true;
@@ -1762,7 +1767,7 @@ pm.on("message", async (ctx) => {
   const app = await kv.get(K.app(ctx.from.id));
   if (!app) return sendGreet(ctx.api, ctx.chat.id, ctx.from, lang);
   // 이미 지원한 학생이 보낸 메시지 → 관리자에게 전달
-  for (const a of adminIds()) {
+  for (const a of await notifyIds(ctx.api)) {
     await ctx.api
       .sendMessage(a, `💬 <b>${esc(app.name)}</b> (<a href="tg://user?id=${app.id}">${esc(app.tgName)}</a>) 님의 메시지:`, html)
       .catch(() => {});

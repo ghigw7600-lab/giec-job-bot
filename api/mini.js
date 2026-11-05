@@ -35,7 +35,7 @@ import {
 import { tx, langOf, KO, langName } from "../src/text.js";
 
 // ── 텔레그램 initData 확인 ──
-function verify(initData) {
+export function verify(initData) {
   if (!initData || !process.env.BOT_TOKEN) return null;
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
@@ -109,6 +109,7 @@ async function jobView(job) {
     attNo: Object.values(att).filter((r) => r === "no").length,
     repostOf: job.repostOf ?? null,
     form: job.form ?? null,
+    media: job.media ?? [],
     kindPay: job.form?.payType ?? null,
     place: job.form?.title ?? first(job).replace(/^📢\s*\[GIEC JOB\]\s*/, "").replace(/\s*모집!?\s*$/, ""),
     off: job.off ?? null,
@@ -208,6 +209,12 @@ const ADMIN = {
   async media() {
     return { items: (await kv.get(mediaKey(this.user.id))) ?? [] };
   },
+  // 봇 대화로 보낸 큰 영상 등 → 지금 쓰는 공고로 가져오기 (가져오면 임시함은 비움 — 다른 공고와 안 섞임)
+  async mediaTake() {
+    const items = (await kv.get(mediaKey(this.user.id))) ?? [];
+    await kv.del(mediaKey(this.user.id));
+    return { items };
+  },
   async mediaDel({ i }) {
     const list = (await kv.get(mediaKey(this.user.id))) ?? [];
     if (i === "all") await kv.del(mediaKey(this.user.id));
@@ -277,13 +284,12 @@ const ADMIN = {
     return { count: list.length, sample: list.slice(0, 50).map(studentView) };
   },
   // 새 공고 보내기
-  async send({ text, kind, off, slots, cap, where, filter, form, withMedia }) {
+  async send({ text, kind, off, slots, cap, where, filter, form, media }) {
     if (!String(text ?? "").trim()) throw new Error("공고 내용을 써 주세요");
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, media: withMedia ? (await kv.get(mediaKey(this.user.id))) ?? [] : [], by: this.who, ids, form: form && typeof form === "object" ? form : null });
-    if (withMedia) await kv.del(mediaKey(this.user.id)); // 붙인 사진·영상은 한 번 쓰면 비움
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, media: (Array.isArray(media) ? media : []).filter((m) => m && typeof m.id === "string" && (m.type === "photo" || m.type === "video")).map((m) => ({ type: m.type, id: m.id })), by: this.who, ids, form: form && typeof form === "object" ? form : null });
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },

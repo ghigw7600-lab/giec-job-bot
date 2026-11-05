@@ -63,6 +63,11 @@
   .tp .dd { padding: 6px 8px; }
   .pop { position: absolute; top: 100%; z-index: 30; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 18px #0002; max-height: 220px; overflow: auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px; width: 220px; }
   .pop button { padding: 8px 0; border-radius: 8px; border: 0; background: var(--bg2); color: var(--text); font-size: 14px; }
+  .mgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0 6px; }
+  .mthumb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--bg2); display: grid; place-items: center; font-size: 22px; }
+  .mthumb img, .mthumb video { width: 100%; height: 100%; object-fit: cover; }
+  .mthumb button { position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: #000a; color: #fff; font-size: 12px; line-height: 22px; padding: 0; }
+  .mthumb .mtag { position: absolute; left: 4px; bottom: 4px; background: #000a; color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 4px; }
   .grp { font-size: 12px; color: var(--hint, #8a9099); margin: 10px 0 4px; }
   a { color: var(--link); text-decoration: none; }
   .empty { text-align: center; color: var(--hint); padding: 40px 10px; }
@@ -132,13 +137,43 @@ const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const F = { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], startDate: "", wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", splitPay: false, payType: "", payDay: "" };
 const F0 = JSON.stringify(F);
-let MEDIA = []; // 봇 대화로 받아 둔 사진·영상
-async function loadMedia() { try { MEDIA = (await api("media")).items ?? []; } catch { MEDIA = []; } }
+// 📷 이 공고에 붙일 사진·영상 (공고마다 따로 — 다른 업장과 안 섞임)
+NEW.media = []; // { type, id, url? }
+let POOL = 0; // 봇 대화로 보내 둔 것 (큰 영상 등) 개수
+let UPLOADING = 0;
+async function loadMedia() { try { POOL = ((await api("media")).items ?? []).length; } catch { POOL = 0; } }
+const VIDEO_MAX = 4.3 * 1024 * 1024; // 미니앱으로 바로 올릴 수 있는 영상 크기 (Vercel 한도)
+async function shrinkPhoto(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise((ok) => c.toBlob((b) => ok(b ?? file), "image/jpeg", 0.85));
+  } catch { return file; }
+}
+async function uploadFiles(files) {
+  for (const f of files) {
+    const video = f.type.startsWith("video/");
+    if (!video && !f.type.startsWith("image/")) continue;
+    if (NEW.media.length >= 10) { toast("사진·영상은 10개까지예요"); break; }
+    if (video && f.size > VIDEO_MAX) { toast(`🎬 영상이 커요 (${(f.size / 1048576).toFixed(1)}MB) — 봇 대화창에 보낸 뒤 [📥 봇 대화에서 가져오기]를 눌러 주세요`); continue; }
+    UPLOADING++; renderNew();
+    try {
+      const body = video ? f : await shrinkPhoto(f);
+      const r = await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/octet-stream", "x-init-data": tg?.initData ?? "", "x-kind": video ? "video" : "photo" }, body });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "올리기 실패");
+      NEW.media.push({ ...j.item, url: URL.createObjectURL(f) });
+    } catch (e) { toast("⚠️ " + e.message); }
+    UPLOADING--; saveDraft(); renderNew();
+  }
+}
 // 쓰던 공고 칸 기억 (봇 대화로 사진 보내러 나갔다 와도 그대로)
 const DRAFT_KEY = "jobdraft";
-const saveDraft = () => { try { if (!NEW.editId) localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, at: Date.now() })); } catch {} };
+const saveDraft = () => { try { if (!NEW.editId) localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, media: NEW.media.map(({ type, id }) => ({ type, id })), at: Date.now() })); } catch {} };
 const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
-try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; } } catch {}
+try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; NEW.media = d.media ?? []; } } catch {}
 // 시간제 근무 날짜 (달력에서 여러 날 고름, "2026-11-05")
 const todayISO = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const isoDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
@@ -584,12 +619,16 @@ function renderNew() {
         : `<button class="btn ghost sm" id="paySplit" type="button" style="margin-top:6px">＋ 주말 시급 따로 넣기</button>`}`}
       <label class="f">급여 지급일</label><input data-f="payDay" placeholder="${{ 시간제: "근무 당일 / 다음 날", 주급제: "근무 후 약 1주일 뒤 수요일 또는 금요일", 월급제: "매월 10일" }[F.payType] ?? ""}" value="${esc(F.payDay)}">
     </div>
-    ${NEW.editId ? "" : `<div class="card">
-      <div class="row"><b class="sp">📷 사진·영상 <span class="muted" style="font-weight:400">(선택)</span></b><button class="btn ghost sm" id="mdRe" type="button">🔄 다시 확인</button></div>
-      ${MEDIA.length
-        ? `<div class="chips" style="margin-top:8px">${MEDIA.map((m, i) => `<span class="chip on" style="cursor:default">${m.type === "video" ? "🎬 영상" : "📷 사진"} ${i + 1} <a href="#" data-mdx="${i}" style="color:inherit;margin-left:4px" aria-label="빼기">✕</a></span>`).join("")}</div>
-          <div class="muted" style="font-size:12px">${MEDIA.length > 1 ? `${MEDIA.length}개를 한 묶음(앨범)으로 올리고, 그 아래에 공고 글·지원 버튼이 달려요.` : "사진 아래에 공고 글·지원 버튼이 같이 달려요."} <a href="#" id="mdAll">모두 비우기</a></div>`
-        : `<div class="muted" style="font-size:13px;margin-top:6px">이 봇 대화창에 사진·영상을 보내면 여기에 나타나요. 여러 장은 한 번에 골라서 보내면 채널에 묶음으로 올라가요. 보낸 뒤 [🔄 다시 확인]을 눌러 주세요.</div>`}
+    ${NEW.editId ? `<div class="card muted" style="font-size:13px">📷 올라간 공고의 사진·영상은 수정에서 못 바꿔요 (글·인원만 바뀌어요).</div>` : `<div class="card">
+      <b>📷 사진·영상 <span class="muted" style="font-weight:400">(선택 · 이 공고에만 붙어요)</span></b>
+      ${NEW.media.length ? `<div class="mgrid">${NEW.media.map((m, i) => `<div class="mthumb">${m.url ? (m.type === "video" ? `<video src="${m.url}" muted playsinline></video>` : `<img src="${m.url}" alt="">`) : `<span>${m.type === "video" ? "🎬" : "📷"}</span>`}${m.type === "video" ? `<b class="mtag">영상</b>` : ""}<button type="button" data-mdx="${i}" aria-label="빼기">✕</button></div>`).join("")}</div>
+        <div class="muted" style="font-size:12px">${NEW.media.length > 1 ? `${NEW.media.length}개가 한 묶음(앨범)으로 올라가고, 그 아래에 공고 글·지원 버튼이 달려요.` : "사진 아래에 공고 글·지원 버튼이 같이 달려요."}</div>` : ""}
+      ${UPLOADING ? `<div class="muted" style="margin-top:6px">⏳ 올리는 중… (${UPLOADING})</div>` : ""}
+      <div class="btns" style="margin-top:8px">
+        <label class="btn ghost" style="flex:1;text-align:center;cursor:pointer">＋ 사진·영상 추가<input id="mdFile" type="file" accept="image/*,video/*" multiple hidden></label>
+        ${POOL ? `<button class="btn ghost" id="mdTake" type="button">📥 봇 대화에서 가져오기 (${POOL})</button>` : ""}
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:6px">여러 장은 한 번에 골라도 돼요. 4MB가 넘는 긴 영상은 봇 대화창에 보낸 뒤 [📥 봇 대화에서 가져오기]로 붙여요.</div>
     </div>`}
     <div class="card">
       <div class="row"><b class="sp">👀 미리보기</b><button class="btn ghost sm" id="toRaw" type="button">✏️ 글로 직접 고치기</button></div>
@@ -627,9 +666,9 @@ function renderNew() {
     NEW.tp = part === "h" ? `${k}:m` : null; // 시 고르면 바로 분 목록
     renderNew();
   }));
-  $("#mdRe") && ($("#mdRe").onclick = async () => { await loadMedia(); toast(MEDIA.length ? `📷 ${MEDIA.length}개 있어요` : "아직 받은 사진·영상이 없어요"); renderNew(); });
-  document.querySelectorAll("[data-mdx]").forEach((a) => (a.onclick = async (e) => { e.preventDefault(); await api("mediaDel", { i: a.dataset.mdx }); await loadMedia(); renderNew(); }));
-  $("#mdAll") && ($("#mdAll").onclick = async (e) => { e.preventDefault(); await api("mediaDel", { i: "all" }); MEDIA = []; renderNew(); });
+  $("#mdFile") && ($("#mdFile").onchange = (e) => uploadFiles([...e.target.files]));
+  document.querySelectorAll("[data-mdx]").forEach((b) => (b.onclick = () => { NEW.media.splice(Number(b.dataset.mdx), 1); saveDraft(); renderNew(); }));
+  $("#mdTake") && ($("#mdTake").onclick = async () => { try { const r = await api("mediaTake"); NEW.media.push(...r.items.slice(0, 10 - NEW.media.length)); POOL = 0; saveDraft(); toast(`📥 ${r.items.length}개 붙였어요`); renderNew(); } catch (e) { toast("⚠️ " + e.message); } });
   saveDraft();
   $("#paySplit") && ($("#paySplit").onclick = () => { F.splitPay = true; renderNew(); });
   $("#payOne") && ($("#payOne").onclick = () => { F.splitPay = false; F.wePay = ""; renderNew(); });
@@ -672,6 +711,7 @@ function renderNew() {
     document.querySelectorAll("[data-past]").forEach((b) => (b.onclick = () => {
       const j = DATA.jobs.find((x) => String(x.id) === b.dataset.past); if (!j) return;
       NEW.pastOpen = false;
+      if (j.media?.length) NEW.media = j.media.map(({ type, id }) => ({ type, id }));
       if (j.form) { Object.assign(F, JSON.parse(JSON.stringify(j.form)), { dates: [], startDate: "" }); if (F.wePay) F.splitPay = true; /* 날짜는 매번 새로 고름 */ toast(`#${j.id} 불러왔어요 — 날짜·인원만 확인하세요`); }
       else { NEW.text = j.text; NEW.slots = ""; NEW.raw = true; toast(`#${j.id} 글을 불러왔어요 (예전 공고라 글로 고쳐요)`); }
       renderNew();
@@ -698,6 +738,7 @@ function renderNew() {
       NEW.off = isoOff([...F.dates].sort()[0]); // 첫 근무일 = 출근 확인·1:1 학생 고르기 기준
     } else if (!NEW.raw && F.payType) NEW.off = F.startDate ? isoOff(F.startDate) : null; // 주급·월급제 첫 출근일
     if (!NEW.raw && !F.title.trim()) return toast("제목을 써 주세요");
+    if (UPLOADING) return toast("⏳ 사진·영상 올리는 중이에요. 잠깐만요");
     if (!NEW.text.trim()) return toast("공고 내용을 써 주세요");
     if (NEW.cap && NEW.slots && Number(NEW.cap) < Number(NEW.slots)) return toast("지원서 정원은 모집인원보다 같거나 많아야 해요");
     if (NEW.editId) {
@@ -716,10 +757,10 @@ function renderNew() {
     const go = async () => {
       const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
       try {
-        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, cap: NEW.cap || null, withMedia: MEDIA.length > 0, where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, cap: NEW.cap || null, media: NEW.media.map(({ type, id }) => ({ type, id })), where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "", cap: "", raw: false });
-        MEDIA = []; clearDraft();
+        NEW.media = []; clearDraft();
         Object.assign(F, JSON.parse(F0));
         await load(); setTab("jobs"); location.hash = `job=${r.id}`;
       } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "보내기"; }
