@@ -1329,6 +1329,7 @@ export async function reopenJob(api, job, username) {
 // 그룹방 공고에 답글로 남은 인원 알림
 async function postRemaining(api, job, left) {
   if (!job.group) return;
+  if (job.cap && left > 0) return; // 지원서 정원이 있으면 학생은 정원을 모르게 — "N명 남았습니다" 안 달고, 다 차면 "모집 완료"만
   const text = left > 0
     ? `🔔 <b>${left}명 남았습니다</b>`
     : "✅ <b>모집 완료됐습니다</b>";

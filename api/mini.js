@@ -294,7 +294,7 @@ const STUDENT = {
     for (const j of jobs.slice(0, 50)) {
       const applied = !!(await kv.get(`jobyes:${j.id}:${this.user.id}`));
       const taken = ((await kv.smembers(`jobapps:${j.id}`)) ?? []).length;
-      list.push({ id: j.id, urgent: j.kind === "urgent", dateLabel: j.dateLabel, text: [...jobMeta(j), j.text ?? j.caption ?? ""].join("\n"), left: (j.cap ?? j.slots) ? Math.max(0, (j.cap ?? j.slots) - taken) : null, applied });
+      list.push({ id: j.id, urgent: j.kind === "urgent", dateLabel: j.dateLabel, text: [...jobMeta(j), j.text ?? j.caption ?? ""].join("\n"), left: j.cap ? (taken >= j.cap ? 0 : null) : j.slots ? Math.max(0, j.slots - taken) : null, applied }); // 지원서 정원은 학생에게 안 보임
     }
     const t = (k) => tx(lang, k);
     return {
