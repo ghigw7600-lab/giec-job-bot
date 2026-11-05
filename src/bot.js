@@ -400,6 +400,14 @@ bot.on("message", async (ctx, next) => {
   const chat = ctx.chat;
   if (chat?.type !== "group" && chat?.type !== "supergroup") return next();
   const m = ctx.message;
+  // 📌 채널 글이 연결된 그룹방으로 넘어오면 텔레그램이 자동으로 고정함 → 공고·남은 인원·모집 완료 글은 바로 고정 해제 (11-05 대표 요청)
+  //    /pinpost 고정글만 그대로 둠
+  if (m.is_automatic_forward) {
+    const pin = await kv.get("pinmsg");
+    if (m.forward_origin?.message_id && m.forward_origin.message_id === pin) return;
+    await ctx.api.unpinChatMessage(chat.id, m.message_id).catch(() => {});
+    return;
+  }
   if (m.new_chat_members || m.left_chat_member) {
     // 참여·퇴장 알림은 봇이 바로 지움 (2026-11-02 대표 결정 — 다시 켬). 끄려면 Vercel 환경변수 HIDE_JOINS=0
     if (process.env.HIDE_JOINS !== "0") await ctx.deleteMessage().catch(() => {});
