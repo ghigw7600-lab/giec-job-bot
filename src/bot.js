@@ -1673,20 +1673,31 @@ export async function cancelAsNoShow(api, jobId, uid, username) {
   return left;
 }
 
-const attText = (job, apps) =>
-  [
-    `📋 <b>출근 확인 — 공고 #${job.id}</b>${job.dateLabel ? ` · ${job.dateLabel}` : ""}`,
-    `└ ${esc((job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40))}`,
-    `지원자 ${apps.length}명 · 빵꾸 난 사람만 ❌, 나머지는 [✅ 모두 출근]`,
-    "",
-    ...apps.map((a, i) => {
-      const r = job.att?.[a.id];
-      return `${i + 1}. ${r === "ok" ? "✅" : r === "no" ? "❌" : "⬜"} ${esc(a.name)}`;
-    }),
-  ].join("\n");
+// 출근 확인 (11-06 대표 피드백): 안내 문구 없앰([나머지 모두 출근] 버튼은 맨 아래 유지), 출근 시간 표시,
+// 이름 줄(전체 폭, 이름이 안 잘리게) 바로 아래 [✅ 출근][❌ 빵꾸] 줄 — 텔레그램은 한 줄 버튼 너비가 같아서 이렇게 나눔
+const attStartMin = (job) => job.startMin ?? textStartMin(job.text ?? job.caption);
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+const attMark = (r) => (r === "ok" ? "✅" : r === "no" ? "❌" : "⬜");
+const attText = (job, apps, done = false) => {
+  const st = attStartMin(job);
+  const when = [job.dateLabel ? `📅 ${job.dateLabel}` : null, st != null ? `🕘 출근 <b>${hhmm(st)}</b>` : null].filter(Boolean).join(" · ");
+  const lines = [`📋 <b>출근 확인 — 공고 #${job.id}</b>`, `└ ${esc((job.text ?? job.caption ?? "").split("\n")[0].slice(0, 40))}`];
+  if (when) lines.push(when);
+  // 버튼이 없어진 뒤(끝)에만 글로 결과 명단을 남김
+  if (done) lines.push("", ...apps.map((a, i) => `${i + 1}. ${attMark(job.att?.[a.id])} ${esc(a.name)}`));
+  return lines.join("\n");
+};
 const attKeyboard = (job, apps) => {
   const kb = new InlineKeyboard();
-  apps.forEach((a, i) => kb.text(`${i + 1}. ✅`, `a:att:${job.id}:${a.id}:ok`).text(`${i + 1}. ❌ 빵꾸`, `a:att:${job.id}:${a.id}:no`).row());
+  apps.forEach((a, i) => {
+    const r = job.att?.[a.id];
+    kb.text(`${i + 1}. ${attMark(r)} ${a.name}`, "f:noop")
+      .row()
+      .text(r === "ok" ? "● ✅ 출근" : "✅ 출근", `a:att:${job.id}:${a.id}:ok`)
+      .text(r === "no" ? "● ❌ 빵꾸" : "❌ 빵꾸", `a:att:${job.id}:${a.id}:no`)
+      .row();
+  });
+  // 맨 아래: 빵꾸 누른 사람 빼고 아직 안 누른 사람 모두 출근으로 한 번에
   return kb.text("✅ 나머지 모두 출근했어요", `a:attall:${job.id}`);
 };
 
@@ -1739,6 +1750,12 @@ bot.callbackQuery(/^a:att:(\d+):(\d+):(ok|no)$/, async (ctx) => {
   if (!job) return ctx.answerCallbackQuery({ text: "공고를 찾을 수 없어요.", show_alert: true });
   await ctx.answerCallbackQuery({ text: r === "ok" ? "✅ 출근" : "❌ 빵꾸" });
   const apps = await jobApplicants(jobId);
+  // 모두 체크하면 버튼을 거두고 결과 명단으로 마무리 (고칠 땐 관리 미니앱 공고 카드에서)
+  if (apps.every((a) => job.att?.[a.id])) {
+    job.attDone = true;
+    await kv.set(`job:${jobId}`, job, JOB_TTL);
+    return ctx.editMessageText(attText(job, apps, true) + "\n\n✅ 출근 확인 끝", { ...html, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  }
   await ctx.editMessageText(attText(job, apps), { ...html, reply_markup: attKeyboard(job, apps) }).catch(() => {});
 });
 bot.callbackQuery(/^a:attall:(\d+)$/, async (ctx) => {
@@ -1751,7 +1768,7 @@ bot.callbackQuery(/^a:attall:(\d+)$/, async (ctx) => {
   job.attDone = true;
   await kv.set(`job:${jobId}`, job, JOB_TTL);
   await ctx.answerCallbackQuery({ text: "✅ 기록했어요" });
-  await ctx.editMessageText(attText(job, apps) + "\n\n✅ 출근 확인 끝", { ...html, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  await ctx.editMessageText(attText(job, apps, true) + "\n\n✅ 출근 확인 끝", { ...html, reply_markup: { inline_keyboard: [] } }).catch(() => {});
 });
 
 // 학생: 1:1 공고에 관심 / 관심 없음
