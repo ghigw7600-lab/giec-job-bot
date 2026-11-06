@@ -116,6 +116,15 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 try { tg?.disableVerticalSwipes?.(); } catch {} // 목록을 손가락으로 끌어 올리고 내릴 때 미니앱이 닫히지 않게
+// ⌨️ 아이폰: 빈 곳을 눌러도 키보드가 안 내려감 (11-06 혜승) → 입력칸·버튼이 아닌 곳을 누르면 키보드 내림, 한 줄 칸은 [완료/return]으로도 내림
+const hideKb = () => { const a = document.activeElement; if (a && /^(INPUT|TEXTAREA)$/.test(a.tagName)) a.blur(); try { tg?.hideKeyboard?.(); } catch {} };
+document.addEventListener("pointerdown", (e) => {
+  const a = document.activeElement;
+  if (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName)) return;
+  if (e.target.closest("input, textarea, select, button, a, label, [contenteditable], [data-place], [data-pjob], [data-go], [data-job], [data-stu], .chip, .att, .pop, #wkList")) return;
+  hideKb();
+}, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.isComposing) hideKb(); });
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const toast = (m) => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2200); };
