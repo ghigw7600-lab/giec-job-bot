@@ -359,6 +359,36 @@ const jobCard = (j) => `
     <div class="muted">🙋 지원 ${j.applied}${j.cap ? ` / ${j.cap}명 · 모집 ${j.slots ?? "?"}명` : j.slots ? ` / ${j.slots}명` : "명"}${j.attOk || j.attNo ? ` · ✅ ${j.attOk} ❌ ${j.attNo}` : ""} · ${j.bumpedAt ? `⬆️ ${ago(j.bumpedAt)} 끌올` : ago(j.at)}${j.repostOf ? ` · #${j.repostOf} 다시 올림` : ""}</div>
   </div>`;
 
+// ═════════════ 💬 학생과 대화 (11-06 혜승: 지원자 카드에서 바로) ═════════════
+//  @아이디 있으면 텔레그램 대화 바로 / 없으면 [전화번호로 텔레그램 열기] 또는 [봇으로 메시지 보내기]
+const CHAT = {};
+function chatBtn(s) { CHAT[s.id] = { name: s.name, username: s.username, phone: s.phone }; return `<button class="btn ghost sm" data-chat="${s.id}">💬 대화</button>`; }
+const krPhone = (p) => { const d = String(p || "").replace(/\D/g, ""); return /^010\d{8}$/.test(d) ? "+82" + d.slice(1) : /^8210\d{8}$/.test(d) ? "+" + d : null; };
+function openChat(uid) {
+  const c = CHAT[uid] ?? {};
+  if (c.username) return tg?.openTelegramLink(`https://t.me/${c.username}`);
+  const ph = krPhone(c.phone);
+  let box = document.getElementById("chatSheet");
+  if (!box) { box = document.createElement("div"); box.id = "chatSheet"; document.body.appendChild(box); }
+  box.innerHTML = `<div class="modal"><div class="card">
+    <b style="font-size:16px">💬 ${esc(c.name ?? "")}</b>
+    <div class="muted" style="margin:4px 0 10px">텔레그램 아이디(@)가 없는 학생이에요</div>
+    ${ph ? `<button class="btn big" id="chPhone">📱 전화번호로 텔레그램 열기</button><div class="muted" style="font-size:12px;margin:4px 0 12px">학생이 번호 공개를 막아 두면 안 열릴 수 있어요 → 그때는 아래 봇으로</div>` : ""}
+    <textarea id="chText" style="min-height:90px" placeholder="학생에게 보낼 말 (봇이 대신 보내요)"></textarea>
+    <div class="muted" style="font-size:12px;margin-top:4px">학생이 봇에 답장하면 봇이 나한테 전달해 줘요</div>
+    <div class="btns"><button class="btn ghost" id="chNo" style="flex:1">닫기</button><button class="btn green" id="chSend" style="flex:2">🤖 봇으로 보내기</button></div>
+  </div></div>`;
+  $("#chNo").onclick = () => (box.innerHTML = "");
+  $("#chPhone") && ($("#chPhone").onclick = () => { box.innerHTML = ""; tg?.openTelegramLink(`https://t.me/${ph}`); });
+  $("#chSend").onclick = async (e) => {
+    const t = $("#chText").value.trim();
+    if (!t) return toast("보낼 말을 써 주세요");
+    e.currentTarget.disabled = true;
+    try { haptic(); await api("dm", { uid, text: t }); box.innerHTML = ""; toast("💬 봇으로 보냈어요"); } catch (err) { toast("⚠️ " + err.message); e.currentTarget.disabled = false; }
+  };
+}
+document.addEventListener("click", (e) => { const b = e.target.closest("[data-chat]"); if (b) { e.preventDefault(); openChat(b.dataset.chat); } });
+
 // ═════════════ 🏢 업장 → 공고 → 학생 (11-06 혜승 피드백 · 대표 결정) ═════════════
 const placeOf = (j) => (j?.placeId ? (DATA.places ?? []).find((p) => p.id === j.placeId) ?? null : null);
 const partName = (j) => j.form?.part || j.form?.title || j.title;
@@ -466,10 +496,9 @@ function renderPeople(kind) {
         <div class="muted">${s.guest || !s.school ? `정보 없이 지원${s.username ? ` · @${esc(s.username)}` : ""}` : `${s.phone ? `<a href="tel:${esc(s.phone)}">📞 ${esc(s.phone)}</a>` : "📞 번호 없음"} · ${esc(s.school)} · TOPIK ${esc(s.topik)}`}</div>
         <div class="muted">출근 ${s.workOk ?? 0} · 빵꾸 ${s.workNo ?? 0} · 수업 ${s.days?.length ? s.days.join("·") : "없음"}</div>
         <div style="margin-top:6px;font-size:14px">${jobs.map((j) => `<a href="#job=${j.id}" style="display:block">🏢 ${kind === "now" ? "근무 중" : "지원"}: <b>${where(j)}</b>${kind === "now" && timeLabel(j) ? ` <span class="muted">${esc(timeLabel(j))}</span>` : ""}</a>`).join("")}</div>
-        <div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-stu="${s.id}" style="flex:1">학생 카드</button>${s.username ? `<button class="btn ghost sm" data-chat="${esc(s.username)}">💬 대화</button>` : ""}</div>
+        <div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-stu="${s.id}" style="flex:1">학생 카드</button>${chatBtn(s)}</div>
       </div>`).join("") || `<div class="empty">${kind === "now" ? "지금 근무 중인 학생이 없어요" : "배치 기다리는 학생이 없어요"}</div>`}`;
   document.querySelectorAll("[data-stu]").forEach((b) => (b.onclick = () => (location.hash = `stu=${b.dataset.stu}`)));
-  document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => tg?.openTelegramLink(`https://t.me/${b.dataset.chat}`)));
 }
 const placeJobCard = (j) => `
   <div class="card" data-pjob="${j.id}">
@@ -585,8 +614,8 @@ async function renderJob(id) {
       <div class="row"><div class="title sp">${rankPill(a.rank)}${badge(a)} ${esc(a.name)} <span class="muted">${a.gender ?? ""} ${a.age ?? ""}세</span></div>${rankChips(a)}</div>
       <div class="muted">${a.guest || !a.school ? `정보 없이 지원${a.username ? ` · @${esc(a.username)}` : ""}` : `${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}`}</div>
       <div class="muted">출근 ${a.workOk} · 빵꾸 ${a.workNo} · 수업 ${a.days?.length ? a.days.join("·") : "없음"}${seg === "placed" ? (noti.has(Number(a.id)) ? " · 📩 안내 보냄" : " · 안내 전") : ` · ${ago(a.appliedAt)} 지원`}</div>
-      ${seg === "apply" ? `<div class="btns" style="margin-top:8px"><button class="btn sm ${full ? "off" : "green"}" data-plc="${a.id}" style="flex:1">⭐ 배치하기</button><button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}</div>`
-        : `<div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-stu="${a.id}" style="flex:1">학생 카드</button>${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}<button class="btn ghost sm" data-unplc="${a.id}">배치 빼기</button></div>`}
+      ${seg === "apply" ? `<div class="btns" style="margin-top:8px"><button class="btn sm ${full ? "off" : "green"}" data-plc="${a.id}" style="flex:1">⭐ 배치하기</button><button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>${chatBtn(a)}</div>`
+        : `<div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-stu="${a.id}" style="flex:1">학생 카드</button>${chatBtn(a)}<button class="btn ghost sm" data-unplc="${a.id}">배치 빼기</button></div>`}
       ${showAtt ? `<div class="grp">근무 당일 — 출근 체크</div>
       <div class="row" style="gap:6px"><button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}">✅ 출근함</button><button class="att no ${a.att === "no" ? "on" : ""}" data-att="no" data-uid="${a.id}">❌ 안 옴 (빵꾸)</button></div>` : ""}
       <div class="grp">근무 전 — 취소</div>
@@ -663,7 +692,6 @@ async function renderJob(id) {
   document.querySelectorAll("[data-nocancel]").forEach((b) => (b.onclick = () => confirmDo("직전 취소로 빵꾸 1번을 기록하고, 지원을 취소해 자리를 다시 열까요?", () => act(() => api("nocancel", { id, uid: b.dataset.nocancel }), "🚫 빵꾸로 기록하고 자리를 다시 열었어요"))));
   document.querySelectorAll("[data-unapply]").forEach((b) => (b.onclick = () => confirmDo("이 지원을 취소하고 자리를 다시 열까요?", () => act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요"))));
   document.querySelectorAll("[data-stu]").forEach((b) => (b.onclick = () => (location.hash = `stu=${b.dataset.stu}`)));
-  document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => tg?.openTelegramLink(`https://t.me/${b.dataset.chat}`)));
 }
 
 // ── 👥 학생 ──
@@ -751,7 +779,8 @@ function renderStudent(id) {
         <div>🏫 ${esc(s.school)}</div>
         <div>📝 TOPIK ${esc(s.topik)}${s.ielts && s.ielts !== "-" ? ` · IELTS ${esc(s.ielts)}` : ""}${s.car ? " · 🚗 차 있음" : ""}</div>
         <div>📅 수업: ${s.days.length ? s.days.join("·") : "없음"}</div>
-        <div>💬 ${esc(s.tgName)}${s.username ? ` · <a href="#" id="chat">@${esc(s.username)}</a>` : ""}</div>
+        <div>💬 ${esc(s.tgName)}${s.username ? ` · @${esc(s.username)}` : ""}</div>
+        <div class="btns" style="margin-top:8px">${chatBtn(s).replace("btn ghost sm", "btn sm").replace(">💬 대화<", " style=\"flex:1\">💬 학생과 대화<")}</div>
       </div>
       <div class="chips" style="margin-top:12px">${Object.entries(STATUS).filter(([k]) => k !== "closed" || s.status === "closed").map(([k, n]) => `<button class="chip ${s.status === k ? "on" : ""}" data-st="${k}">${n}</button>`).join("")}</div>
     </div>
@@ -778,7 +807,7 @@ function renderStudent(id) {
     <div class="btns" style="margin-top:14px"><button class="btn ghost" id="daysStu" style="flex:1">🔄 수업 요일 다시 받기</button><button class="btn red" id="delStu" style="flex:1">🗑 기록 지우기</button></div>`;
   $("#daysStu").onclick = () => confirmDo(`${s.name} 학생에게 수업 요일을 다시 물어볼까요?`, async () => { try { haptic(); const r = await api("days", { uids: [s.id] }); toast(r.ok ? "🔄 요일 질문을 보냈어요" : "⚠️ 보내지 못했어요 (학생이 봇을 차단했을 수 있어요)"); } catch (e) { toast("⚠️ " + e.message); } });
   $("#delStu").onclick = () => confirmDo(`${s.name} 학생의 자기소개서·기록을 지울까요? 되돌릴 수 없어요. (다음 지원 때 자기소개서를 다시 써요)`, async () => { if (await delStudents([s.id])) history.back(); });
-  $("#chat") && ($("#chat").onclick = (e) => { e.preventDefault(); tg?.openTelegramLink(`https://t.me/${s.username}`); });
+
   document.querySelectorAll("[data-st]").forEach((b) => (b.onclick = async () => { try { haptic(); await api("status", { uid: s.id, status: b.dataset.st }); s.status = b.dataset.st; toast(`${STATUS[s.status]}로 바꿨어요`); renderStudent(id); } catch (e) { toast("⚠️ " + e.message); } }));
   bindRank(() => renderStudent(id));
   // 업장 = 지금까지 올린 공고 (드롭다운 + 검색)

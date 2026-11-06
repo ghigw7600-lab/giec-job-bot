@@ -265,6 +265,16 @@ const ADMIN = {
     else { list.splice(Number(i), 1); await kv.set(mediaKey(this.user.id), list, 24 * 3600); }
     return { ok: true };
   },
+  // 💬 아이디(@) 없는 학생에게 봇으로 메시지 (학생이 답장하면 봇이 관리자에게 전달 — 원래 기능)
+  async dm({ uid, text }) {
+    const t = String(text ?? "").trim().slice(0, 3500);
+    if (!t) throw new Error("보낼 말을 써 주세요");
+    const e = (x) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    await bot.api.sendMessage(Number(uid), `💬 <b>GIEC JOB</b>\n\n${e(t)}`, { parse_mode: "HTML" }).catch(() => {
+      throw new Error("못 보냈어요 — 학생이 봇을 막았거나 봇 대화를 지웠어요");
+    });
+    return { ok: true };
+  },
   async del({ uids }) {
     const list = [...new Set((Array.isArray(uids) ? uids : [uids]).map(Number).filter(Boolean))].slice(0, 500);
     for (const id of list) {
