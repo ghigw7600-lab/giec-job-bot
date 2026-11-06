@@ -87,7 +87,6 @@
   <nav id="tabs">
     <button data-t="jobs" class="on">📋 공고</button>
     <button data-t="new">✍️ 새 공고</button>
-    <button data-t="stats">📊 현황</button>
     <button data-t="students">👥 학생</button>
   </nav>
 </header>
@@ -276,7 +275,7 @@ function render() {
     tab = "new"; document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === "new"));
     setTimeout(refreshMedia, 0);
   }
-  ({ jobs: renderJobs, students: renderStudents, new: renderNew, stats: renderStats })[tab]();
+  (({ jobs: renderJobs, students: renderStudents, new: renderNew })[tab] ?? renderJobs)();
 }
 window.addEventListener("hashchange", render);
 
@@ -818,22 +817,6 @@ function renderNew() {
     };
     tg?.showConfirm ? tg.showConfirm(where, (ok) => ok && go()) : go();
   };
-}
-
-// ── 📊 현황 ──
-function renderStats() {
-  const s = DATA.stats;
-  $("#view").innerHTML = `
-    <div class="stat">
-      <div class="card"><span class="muted">전체 학생</span><b>${s.students}</b><span class="muted">🆕 신규 ${s.newStudents}명</span></div>
-      <div class="card"><span class="muted">이번 주 공고</span><b>${s.weekJobs}</b><span class="muted">지원 ${s.weekApplies}건</span></div>
-      <div class="card"><span class="muted">이번 주 충원율</span><b>${s.fillRate == null ? "-" : s.fillRate + "%"}</b><span class="muted">인원 쓴 공고 기준</span></div>
-      <div class="card"><span class="muted">이번 주 빵꾸</span><b>${s.weekNoShow}</b><span class="muted">출근 확인 기준</span></div>
-    </div>
-    <div class="card" style="margin-top:10px">
-      <b>⚠️ 빵꾸 많은 학생</b>
-      ${s.flaky.length ? s.flaky.map((x) => `<div class="hist"><a href="#stu=${x.id}">${esc(x.name)}</a> · 빵꾸 ${x.workNo} · 출근 ${x.workOk}</div>`).join("") : `<div class="muted" style="margin-top:6px">없어요 👍</div>`}
-    </div>`;
 }
 
 (async () => {
