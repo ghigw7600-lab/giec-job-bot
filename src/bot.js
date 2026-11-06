@@ -1454,7 +1454,7 @@ async function postRemaining(api, job, left) {
   if (job.cap && left > 0) return; // 지원서 정원이 있으면 학생은 정원을 모르게 — "N명 남았습니다" 안 달고, 다 차면 "모집 완료"만
   const text = left > 0
     ? `🔔 <b>${left}명 남았습니다</b>`
-    : "✅ <b>모집 완료됐습니다</b>";
+    : "✅ <b>완료</b>";
   await api
     .sendMessage(job.group.chat, text, { parse_mode: "HTML", disable_notification: true, reply_parameters: { message_id: job.group.msgId, allow_sending_without_reply: true } })
     .catch(() => {});
