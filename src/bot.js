@@ -406,6 +406,8 @@ bot.on("message", async (ctx, next) => {
     const pin = await kv.get("pinmsg");
     if (m.forward_origin?.message_id && m.forward_origin.message_id === pin) return;
     await ctx.api.unpinChatMessage(chat.id, m.message_id).catch(() => {});
+    // 채널 글의 그룹방 사본 번호 기억 (이벤트 글 끌올 때 예전 사본도 같이 지우려고, 2일)
+    if (m.forward_origin?.message_id) await kv.set(`fwdcopy:${m.forward_origin.message_id}`, { chat: chat.id, msgId: m.message_id }, 2 * 24 * 3600);
     return;
   }
   if (m.new_chat_members || m.left_chat_member) {
@@ -487,7 +489,7 @@ const HELP = [
   "",
   "/joinlink — 채널 환영 링크 (이 링크로 들어오면 봇이 인사 + 정보 받기)",
   "/pinpost — 채널에 [정보 남기기] 버튼 글 올리고 고정 (이미 있는 학생용)",
-  "/refpost — 🤝 친구 소개 이벤트 포스터를 채널에 올리기 ([🎓 비자 전환] [🔗 내 소개 링크] 버튼이 붙음)",
+  "/refpost — 🤝 친구 소개 이벤트 포스터를 채널에 올리기 ([🎓 비자 전환] [🔗 내 소개 링크] 버튼이 붙음, 매일 저녁 9시 끌올 · 끄기 /refstop · 상태 /refdaily)",
   "/jobs — 🛠 관리 화면 (공고별 지원자·모집 완료·다시 올리기·출근 기록 / 학생 표 / 현황) — 입력창 왼쪽 [🛠 관리] 버튼과 같아요",
   "/find — 공고 올리기: 🚨 긴급(오늘·내일) / 📅 일반(5일 안) → 학생 찾기 → 그룹방·1:1로 보내기 → ✅ 모집 완료",
   "/export — 지원자 전체 엑셀(CSV)",
@@ -642,11 +644,81 @@ bot.callbackQuery(/^rp:(ok|no)$/, async (ctx) => {
       ...(r.caption != null ? { caption: r.caption } : {}),
     });
     await kv.del(refKey(ctx.from.id));
+    await refDailyReplace(ctx.api, { chat: ch.id, msgId: sent.message_id }); // ⬆️ 매일 저녁 9시 끌올 대상으로 (예전 이벤트 글은 지움)
     const link = ch.username ? `https://t.me/${ch.username}/${sent.message_id}` : `https://t.me/c/${String(ch.id).replace(/^-100/, "")}/${sent.message_id}`;
-    return ctx.reply(`✅ 「${esc(ch.title ?? "채널")}」에 올렸어요.\n${link}`, { ...html, link_preview_options: { is_disabled: true } });
+    return ctx.reply(`✅ 「${esc(ch.title ?? "채널")}」에 올렸어요.\n${link}\n\n⬆️ 매일 한국 시간 저녁 9시에 맨 아래로 끌올돼요 (알림 소리 없이, 그 사이 새 공고가 없으면 건너뜀).\n그만하려면 /refstop`, { ...html, link_preview_options: { is_disabled: true } });
   } catch (e) {
     return ctx.reply(`⚠️ 못 올렸어요: ${e.description ?? e.message}`);
   }
+});
+
+// ⬆️ 친구 소개 이벤트 글 매일 끌올 (11-06 대표 요청)
+//  - 한국 시간 저녁 9시(우즈벡 오후 5시) — 한국 학생·현지 친구 둘 다 폰을 보는 시간
+//  - 일자리 공고 배려: ① 이벤트 글은 늘 1개(예전 글·그룹방 사본 지움) ② 알림 소리 없이 올림
+//    ③ 그 사이 새 공고·끌올이 없으면 이미 맨 아래라 건너뜀 ④ 30분 안에 올라온 공고가 있으면 공고가 먼저 보이게 기다림(최대 21:50)
+//  kv refdaily = { on, chat, msgId, group: {chat,msgId}, at, day }
+const REFD = "refdaily";
+const kstDay = (ts = Date.now()) => new Date(ts + 9 * 3600e3).toISOString().slice(0, 10);
+async function refDailyReplace(api, posted, keepOld = false) {
+  const r = (await kv.get(REFD)) ?? {};
+  if (!keepOld && r.chat && r.msgId && r.msgId !== posted.msgId) {
+    await api.deleteMessage(r.chat, r.msgId).catch(() => {});
+    const g = r.group ?? (await kv.get(`fwdcopy:${r.msgId}`));
+    if (g) await api.deleteMessage(g.chat, g.msgId).catch(() => {});
+  }
+  await kv.set(REFD, { on: true, chat: posted.chat, msgId: posted.msgId, group: null, at: Date.now(), day: r.day ?? null });
+}
+export async function refDaily(api) {
+  const r = await kv.get(REFD);
+  if (!r?.on || !r.msgId) return "off";
+  const now = new Date(Date.now() + 9 * 3600e3);
+  const h = now.getUTCHours(), mi = now.getUTCMinutes();
+  if (!(h === 21 || (h === 22 && mi < 30))) return "not-time"; // 21:00~22:29 (GitHub 정기 실행이 늦을 때 대비)
+  const today = kstDay();
+  if (r.day === today) return "done";
+  const jobs = (await kv.mget(((await kv.smembers(K.jobs)) ?? []).map((x) => `job:${x}`))).filter((j) => j?.group?.chat === r.chat);
+  const after = jobs.filter((j) => j.group.msgId > r.msgId);
+  if (!after.length) { await kv.set(REFD, { ...r, day: today }); return "already-bottom"; }
+  const latest = Math.max(...after.map((j) => j.bumpedAt ?? j.at ?? 0));
+  if (Date.now() - latest < 30 * 60e3 && h === 21 && mi < 50) return "wait-job";
+  const username = await meName(api);
+  try {
+    const sent = await api.copyMessage(r.chat, r.chat, r.msgId, { reply_markup: refKeyboard(username), disable_notification: true });
+    await refDailyReplace(api, { chat: r.chat, msgId: sent.message_id });
+    await kv.set(REFD, { ...(await kv.get(REFD)), day: today });
+    return "bumped";
+  } catch (e) {
+    console.error("이벤트 끌올 실패:", e.description ?? e.message);
+    await kv.set(REFD, { ...r, day: today }); // 오늘은 그만 (내일 다시)
+    return "fail";
+  }
+}
+// /refstop — 매일 끌올 그만 (글은 그대로) · /refdaily — 상태 보기 · /refdaily <채널 글 링크> — 이미 올린 글을 끌올 대상으로
+admin.command("refstop", async (ctx) => {
+  const r = await kv.get(REFD);
+  if (!r?.on) return ctx.reply("매일 끌올은 이미 꺼져 있어요.");
+  await kv.set(REFD, { ...r, on: false });
+  return ctx.reply("⏸ 친구 소개 글 매일 끌올을 껐어요. (채널 글은 그대로)\n다시 켜려면 /refdaily on");
+});
+admin.command("refdaily", async (ctx) => {
+  const arg = String(ctx.match ?? "").trim();
+  const ch = await kv.get(K.channel);
+  if (/^on$/i.test(arg)) {
+    const r = await kv.get(REFD);
+    if (!r?.msgId) return ctx.reply("끌올할 글이 없어요. /refpost 로 올리거나 /refdaily <채널 글 링크>");
+    await kv.set(REFD, { ...r, on: true });
+    return ctx.reply("▶️ 다시 매일 저녁 9시에 끌올해요.");
+  }
+  const m = arg.match(/t\.me\/(?:c\/\d+|[\w]+)\/(\d+)/);
+  if (m) {
+    if (!ch) return ctx.reply("⚠️ 채널을 아직 몰라요");
+    const r = (await kv.get(REFD)) ?? {};
+    await kv.set(REFD, { on: true, chat: ch.id, msgId: Number(m[1]), group: null, at: Date.now(), day: r.day ?? null });
+    return ctx.reply(`✅ 이 글(${m[1]}번)을 매일 저녁 9시에 끌올할게요.\n⚠️ 이 글의 그룹방 사본은 봇이 몰라서, 첫 끌올 뒤 그룹방에 남은 예전 사본 하나만 직접 지워 주세요.`);
+  }
+  const r = await kv.get(REFD);
+  if (!r?.msgId) return ctx.reply("아직 끌올할 이벤트 글이 없어요. /refpost 로 올리면 자동으로 매일 끌올돼요.");
+  return ctx.reply(`⬆️ 친구 소개 글 매일 끌올: ${r.on ? "켜짐" : "꺼짐"}\n지금 글: ${r.msgId}번 · 마지막 확인: ${r.day ?? "아직"}\n매일 한국 시간 21:00 (그 사이 새 공고가 없으면 건너뜀)\n${r.on ? "끄기: /refstop" : "켜기: /refdaily on"}`);
 });
 
 admin.command("reset", async (ctx) => {
@@ -1997,6 +2069,7 @@ async function cleanupTemp(api) {
 export async function runReminders(api) {
   await cleanupTemp(api).catch(() => {});
   await checkAttendance(api).catch((e) => console.error("출근 확인 실패:", e.message));
+  await refDaily(api).catch((e) => console.error("이벤트 끌올 실패:", e.message));
   const h = hourKST();
   if (h < 10 || h >= 22) return 0;
   let sent = 0;
