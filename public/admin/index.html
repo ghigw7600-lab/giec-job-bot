@@ -79,14 +79,33 @@
   @keyframes sh { to { background-position: -200% 0; } }
   .hist { font-size: 13px; margin: 2px 0; }
   .count { font-size: 14px; margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--bg2); }
+  /* 🏢 업장 탭 (11-06) */
+  .sum { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .sum .card { margin: 0; padding: 10px 12px; }
+  .sum b { display: block; font-size: 22px; }
+  .pill.live { background: #e5f6ec; color: #13723f; font-weight: 700; }
+  .pill.wait { background: #fff2b3; color: #6b5200; font-weight: 700; }
+  .pill.blue { background: #e3efff; color: #1f5fbf; }
+  [data-place], [data-pjob] { cursor: pointer; }
+  .more { border: 0; background: none; color: var(--link); font-size: 13px; padding: 6px 0 0; }
+  .kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; font-size: 14px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  .kv > span:nth-child(odd) { color: var(--hint); font-size: 13px; }
+  .seg { display: flex; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; margin: 12px 0 10px; }
+  .seg button { flex: 1; border: 0; border-radius: 9px; padding: 10px 6px; font-size: 14px; font-weight: 700; background: none; color: var(--hint); }
+  .seg button.on { background: var(--btn); color: var(--btn-text); }
+  .btn.big { width: 100%; padding: 13px 14px; font-size: 15px; }
+  .btn.green { background: var(--ok); color: #fff; }
+  .btn.off { background: var(--bg2); color: var(--hint); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 18px; z-index: 60; }
+  .modal .card { width: 100%; max-width: 440px; margin: 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>🛠 GIEC JOB 관리</h1>
   <nav id="tabs">
-    <button data-t="jobs" class="on">📋 공고</button>
-    <button data-t="new">✍️ 새 공고</button>
+    <button data-t="places" class="on">🏢 업장</button>
+    <button data-t="jobs">📋 공고</button>
     <button data-t="students">👥 학생</button>
   </nav>
 </header>
@@ -132,13 +151,13 @@ const WD = ["일", "월", "화", "수", "목", "금", "토"];
 const kst = (off) => { const d = new Date(Date.now() + 9 * 3600e3 + off * 864e5); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
 
 let DATA = null;
-let tab = "jobs";
+let tab = "places";
 let jobFilter = "open";
 let stuQ = "", stuF = {};
 const NEW = { kind: "urgent", off: 0, where: "g", topik: 0, car: false, gender: "", noFlaky: false, text: "", slots: "", cap: "", noInfo: 1, raw: false };
 // 공고 양식 칸 (11-04 혜승: 누르고 빈칸에 타이핑) → 양식 글로 자동 조립
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
-const F = { title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], startDate: "", wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", splitPay: false, payType: "", payDay: "" };
+const F = { part: "", title: "", task: "", sex: "", count: "", addr: "", days: [], dates: [], startDate: "", wdS: "", wdE: "", weS: "", weE: "", wdPay: "", wePay: "", splitPay: false, payType: "", payDay: "" };
 const F0 = JSON.stringify(F);
 // 📷 이 공고에 붙일 사진·영상 (공고마다 따로 — 다른 업장과 안 섞임)
 NEW.media = []; // { type, id, url? }
@@ -187,13 +206,13 @@ const EDIT_KEY = "jobeditdraft"; // 공고 수정 중 용량 초과로 봇 대�
 const saveDraft = () => { try {
   const media = NEW.media.map(({ type, id }) => ({ type, id }));
   if (NEW.editId) localStorage.setItem(EDIT_KEY, JSON.stringify({ editId: NEW.editId, kind: NEW.kind, raw: NEW.raw, text: NEW.text, slots: NEW.slots, cap: NEW.cap, F, media, at: Date.now() }));
-  else localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, media, at: Date.now() }));
+  else localStorage.setItem(DRAFT_KEY, JSON.stringify({ F, kind: NEW.kind, cap: NEW.cap, placeId: NEW.placeId ?? null, media, at: Date.now() }));
 } catch {} };
 const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch {} };
 // 새 공고 쓰던 것 불러오기 (수정을 마치거나 그만둘 때도 다시 불러옴)
 function loadNewDraft() {
   NEW.media = []; NEW.cap = "";
-  try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; NEW.media = d.media ?? []; } } catch {}
+  try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); if (d && Date.now() - d.at < 24 * 3600e3) { Object.assign(F, d.F); NEW.kind = d.kind ?? NEW.kind; NEW.cap = d.cap ?? ""; NEW.media = d.media ?? []; NEW.placeId = d.placeId ?? null; } } catch {}
 }
 loadNewDraft();
 // 시간제 근무 날짜 (달력에서 여러 날 고름, "2026-11-05")
@@ -268,6 +287,8 @@ function render() {
   const h = location.hash.slice(1);
   if (h.startsWith("job=")) return renderJob(h.slice(4));
   if (h.startsWith("stu=")) return renderStudent(h.slice(4));
+  if (h.startsWith("place=")) return renderPlace(h.slice(6));
+  if (h.startsWith("placeEdit=")) return renderPlaceEdit(h.slice(10));
   if (h.startsWith("new")) { // 봇 /find 에서 [📝 양식 채우기] → #new=urgent:0
     const [k, o] = (h.split("=")[1] ?? "").split(":");
     if (k) { NEW.kind = k === "normal" ? "normal" : "urgent"; NEW.off = o === "" || o == null ? null : Number(o); }
@@ -275,7 +296,7 @@ function render() {
     tab = "new"; document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === "new"));
     setTimeout(refreshMedia, 0);
   }
-  (({ jobs: renderJobs, students: renderStudents, new: renderNew })[tab] ?? renderJobs)();
+  (({ places: renderPlaces, jobs: renderJobs, students: renderStudents, new: renderNew })[tab] ?? renderPlaces)();
 }
 window.addEventListener("hashchange", render);
 
@@ -288,7 +309,7 @@ function renderJobs() {
     <div class="chips">${[["open", "열린 공고"], ["closed", "모집 완료"], ["all", "전체"]].map(([k, n]) => `<button class="chip ${jobFilter === k ? "on" : ""}" data-f="${k}">${n}</button>`).join("")}</div>
     <div class="row" style="margin:0 2px 8px"><span class="muted sp">${list.length}개${jobPick ? ` · <b>${jobSel.size}개 고름</b>` : ""}</span>
       ${jobPick ? `<button class="btn ghost sm" id="jSelAll">${list.length && list.every((j) => jobSel.has(String(j.id))) ? "모두 풀기" : "모두 선택"}</button>` : `<button class="btn ghost sm" id="jPickOn">☑ 고르기</button>`}</div>
-    ${list.length ? list.map(jobCard).join("") : `<div class="empty">공고가 없어요.<br>✍️ 새 공고 탭이나 봇의 /find 로 올려보세요.</div>`}
+    ${list.length ? list.map(jobCard).join("") : `<div class="empty">공고가 없어요.<br>🏢 업장 탭에서 업장을 고르고 [+ 공고 추가]로 올려 보세요.</div>`}
     ${jobPick ? `<div style="height:76px"></div><div style="position:fixed;left:0;right:0;bottom:0;background:var(--bg2,#f2f3f5);border-top:1px solid #8883;padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;z-index:40">
       <button class="btn ghost" id="jPickOff" style="flex:0 0 auto">✕</button>
       <button class="btn red" id="jDel" style="flex:1" ${jobSel.size ? "" : "disabled"}>🗑 공고 삭제${jobSel.size ? ` (${jobSel.size})` : ""}</button>
@@ -324,66 +345,270 @@ const jobCard = (j) => `
       <span class="sp"></span>
       <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "✅ 모집 완료" : "모집 중"}</span>
     </div>
-    <div class="title" style="margin-top:6px">#${j.id} ${esc(j.title)}</div>
+    <div class="title" style="margin-top:6px">#${j.id} ${placeOf(j) ? `🏢 ${esc(placeOf(j).name)} · ${esc(partName(j))}` : esc(j.title)}</div>
     <div class="muted">🙋 지원 ${j.applied}${j.cap ? ` / ${j.cap}명 · 모집 ${j.slots ?? "?"}명` : j.slots ? ` / ${j.slots}명` : "명"}${j.attOk || j.attNo ? ` · ✅ ${j.attOk} ❌ ${j.attNo}` : ""} · ${j.bumpedAt ? `⬆️ ${ago(j.bumpedAt)} 끌올` : ago(j.at)}${j.repostOf ? ` · #${j.repostOf} 다시 올림` : ""}</div>
   </div>`;
 
-async function renderJob(id) {
-  $("#view").innerHTML = `<button class="back" onclick="history.back()">‹ 목록</button><div class="skel"></div><div class="skel"></div>`;
-  let d;
-  try { d = await api("job", { id }); } catch (e) { $("#view").innerHTML = `<button class="back" onclick="history.back()">‹ 목록</button><div class="empty">⚠️ ${esc(e.message)}</div>`; return; }
-  const j = d.job;
-  const lim = j.cap ?? j.slots;
-  const left = lim ? Math.max(0, lim - j.applied) : null;
-  const unmarked = d.applicants.filter((a) => !a.att).length;
+// ═════════════ 🏢 업장 → 공고 → 학생 (11-06 혜승 피드백 · 대표 결정) ═════════════
+const placeOf = (j) => (j?.placeId ? (DATA.places ?? []).find((p) => p.id === j.placeId) ?? null : null);
+const partName = (j) => j.form?.part || j.form?.title || j.title;
+const hhmm = (min) => `${String(Math.floor(min / 60) % 24).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+const tmin = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(v || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+const nowK = () => { const d = new Date(Date.now() + 9 * 3600e3); return { iso: d.toISOString().slice(0, 10), dow: (d.getUTCDay() + 6) % 7, min: d.getUTCHours() * 60 + d.getUTCMinutes() }; };
+// 오늘 근무일인지 · 지금 근무시간 안인지 (공고 칸의 날짜·요일·시간으로)
+function sched(j) {
+  const f = j.form || {}, n = nowK();
+  let today = false, s = null, e = null;
+  if (f.payType === "시간제") { today = (f.dates || []).includes(n.iso); s = tmin(f.wdS); e = tmin(f.wdE); }
+  else if (f.payType) {
+    today = (f.days || []).includes(n.dow) && (!f.startDate || f.startDate <= n.iso);
+    const we = n.dow >= 5;
+    s = tmin(we ? f.weS || f.wdS : f.wdS || f.weS); e = tmin(we ? f.weE || f.wdE : f.wdE || f.weE);
+  } else { today = j.date === n.iso; s = j.startMin; e = s != null ? s + 480 : null; }
+  const inWin = s != null && e != null && (e > s ? n.min >= s && n.min < e : n.min >= s || n.min < e);
+  return { today, now: today && inWin };
+}
+const workingN = (j) => (sched(j).now ? Math.max(0, (j.placed?.length ?? 0) - (j.placedNo ?? 0)) : 0);
+const todayN = (j) => (sched(j).today ? j.placed?.length ?? 0 : 0);
+function whenLabel(j) {
+  const f = j.form || {};
+  if (f.payType === "시간제") return f.dates?.length ? [...f.dates].sort().map(isoDay).join(" · ") : "날짜 미정";
+  if (f.payType) return [f.days?.length ? [...f.days].sort((a, b) => a - b).map((i) => DAYS[i]).join("·") : null, f.startDate ? `${isoDay(f.startDate)}부터` : null].filter(Boolean).join(" · ") || "요일 미정";
+  return j.dateLabel || "날짜 없음";
+}
+function timeLabel(j) {
+  const f = j.form || {};
+  const t = (a, b) => (a || b ? `${a || "?"}–${b || "?"}` : "");
+  if (!f.payType) return j.startMin != null ? `${hhmm(j.startMin)} 시작` : "";
+  const out = [t(f.wdS, f.wdE)];
+  if (f.payType !== "시간제" && (f.days || []).some((x) => x >= 5) && t(f.weS, f.weE) && t(f.weS, f.weE) !== t(f.wdS, f.wdE)) out.push(`주말 ${t(f.weS, f.weE)}`);
+  return out.filter(Boolean).join(" · ");
+}
+function payLabel(j) {
+  const f = j.form || {};
+  if (!f.payType) return "";
+  if (f.payType === "월급제") return f.wdPay ? `월급 ${won(f.wdPay)}` : "월급제";
+  return [f.wdPay ? `시급 ${won(f.wdPay)}` : null, f.splitPay && f.wePay ? `주말 ${won(f.wePay)}` : null, f.payType].filter(Boolean).join(" · ");
+}
+const unNotified = (j) => (j.placed ?? []).filter((u) => !(j.notified ?? []).includes(u));
+function jobStatusPill(j) {
+  if (!j.closed) return `<span class="pill open">모집 중</span>`;
+  if (unNotified(j).length) return `<span class="pill wait">안내 전</span>`;
+  return `<span class="pill closed">모집 완료</span>`;
+}
+const liveChip = (now, today) => (now ? `<span class="pill live">근무 중 ${now}명</span>` : today ? `<span class="pill blue">오늘 배치 ${today}명</span>` : `<span class="pill">오늘 쉼</span>`);
+const areaOf = (addr) => String(addr || "").split(/\s+/).slice(0, 2).join(" ");
+
+function renderPlaces() {
+  const P = DATA.places ?? [];
+  const jobsOf = (pid) => DATA.jobs.filter((j) => j.placeId === pid);
+  const loose = DATA.jobs.filter((j) => !placeOf(j));
+  const nowSum = DATA.jobs.reduce((s, j) => s + workingN(j), 0);
+  const open = DATA.jobs.filter((j) => !j.closed);
+  const waitN = open.reduce((s, j) => s + Math.max(0, j.applied - (j.placed?.length ?? 0)), 0);
+  const rows = P.map((p) => {
+    const js = jobsOf(p.id);
+    return { p, js, now: js.reduce((s, j) => s + workingN(j), 0), today: js.reduce((s, j) => s + todayN(j), 0), open: js.filter((j) => !j.closed).length, last: Math.max(p.at ?? 0, ...js.map((j) => j.bumpedAt ?? j.at ?? 0)) };
+  }).sort((a, b) => b.now - a.now || b.today - a.today || b.open - a.open || b.last - a.last);
   $("#view").innerHTML = `
-    <button class="back" onclick="location.hash=''">‹ 목록</button>
+    <div class="sum">
+      <div class="card"><span class="muted">지금 근무 중</span><b style="color:var(--ok)">${nowSum}명</b></div>
+      <div class="card"><span class="muted">모집 중 공고</span><b style="color:var(--link)">${open.length}개</b></div>
+      <div class="card"><span class="muted">배치 기다림</span><b style="color:var(--warn)">${waitN}명</b></div>
+    </div>
+    <button class="btn ghost big" id="addPlace" style="margin-bottom:10px;border:1.5px dashed var(--btn);background:none;color:var(--link)">＋ 업장 등록</button>
+    ${rows.map(({ p, js, now, today, open }) => `
+      <div class="card" data-place="${p.id}">
+        <div class="row"><b class="sp" style="font-size:16px">${esc(p.name)}</b>${liveChip(now, today)}</div>
+        <div class="muted">${p.addr ? `${esc(areaOf(p.addr))} · ` : ""}학생에게는 “${esc(p.shown)}”</div>
+        <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap"><span class="pill">공고 ${js.length}개</span>${open ? `<span class="pill open">모집 중 ${open}</span>` : ""}${js.some((j) => j.closed && unNotified(j).length) ? `<span class="pill wait">안내 전 공고 있음</span>` : ""}</div>
+      </div>`).join("") || `<div class="empty">아직 등록한 업장이 없어요.<br>위 [＋ 업장 등록]으로 시작하세요.</div>`}
+    ${loose.length ? `<div class="card" data-place="none" style="background:none;border:1px dashed var(--line)"><div class="row"><b class="sp">📂 업장 없는 공고</b><span class="pill">${loose.length}개</span></div><div class="muted">예전 공고 · 공고 안 [더보기]에서 업장을 연결할 수 있어요</div></div>` : ""}`;
+  $("#addPlace").onclick = () => (location.hash = "placeEdit=new");
+  document.querySelectorAll("[data-place]").forEach((c) => (c.onclick = () => (location.hash = `place=${c.dataset.place}`)));
+}
+
+const placeJobCard = (j) => `
+  <div class="card" data-pjob="${j.id}">
+    <div class="row"><b class="sp" style="font-size:16px">${esc(partName(j))}</b>${j.kind === "urgent" && !j.closed ? `<span class="pill urgent">급구</span>` : ""}${jobStatusPill(j)}</div>
+    <div style="font-size:14px;margin-top:4px">📅 ${esc(whenLabel(j))}</div>
+    ${timeLabel(j) || payLabel(j) ? `<div class="muted">${esc([timeLabel(j), payLabel(j)].filter(Boolean).join(" · "))}</div>` : ""}
+    <div style="font-size:13px;margin-top:4px">${j.closed ? `배치 ${j.placed.length}명${j.notified.length ? ` · 안내 ${j.notified.length}명` : ""}` : `지원 ${Math.max(0, j.applied - j.placed.length)}명 · 배치 ${j.placed.length}${j.slots ? ` / ${j.slots}명` : "명"}`}${workingN(j) ? ` · <b style="color:var(--ok)">근무 중 ${workingN(j)}명</b>` : ""}</div>
+  </div>`;
+const MORE = {};
+function renderPlace(id) {
+  if (id === "none") {
+    const loose = DATA.jobs.filter((j) => !placeOf(j));
+    $("#view").innerHTML = `<button class="back" onclick="location.hash=''">‹ 업장 목록</button>
+      <div class="card"><b style="font-size:17px">📂 업장 없는 공고</b><div class="muted">공고를 누르고 [더보기] → 업장 연결로 옮길 수 있어요</div></div>
+      ${loose.map(placeJobCard).join("") || `<div class="empty">없어요</div>`}`;
+    document.querySelectorAll("[data-pjob]").forEach((c) => (c.onclick = () => (location.hash = `job=${c.dataset.pjob}`)));
+    return;
+  }
+  const p = (DATA.places ?? []).find((x) => String(x.id) === String(id));
+  if (!p) { $("#view").innerHTML = `<button class="back" onclick="location.hash=''">‹ 업장 목록</button><div class="empty">업장을 찾을 수 없어요</div>`; return; }
+  const js = DATA.jobs.filter((j) => j.placeId === p.id).sort((a, b) => Number(a.closed) - Number(b.closed) || (b.bumpedAt ?? b.at ?? 0) - (a.bumpedAt ?? a.at ?? 0));
+  const now = js.reduce((s, j) => s + workingN(j), 0), today = js.reduce((s, j) => s + todayN(j), 0);
+  const past = new Set(js.filter((j) => j.closed).flatMap((j) => j.placed)).size;
+  const more = MORE["p" + p.id];
+  $("#view").innerHTML = `
+    <button class="back" onclick="location.hash=''">‹ 업장 목록</button>
     <div class="card">
-      <div class="row">
-        <span class="pill ${j.kind === "urgent" ? "urgent" : ""}">${j.kind === "urgent" ? "🚨 긴급" : "📢 일반"}</span>
-        ${j.dateLabel ? `<span class="pill">📅 ${esc(j.dateLabel)}</span>` : ""}
-        <span class="sp"></span>
-        <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "✅ 모집 완료" : "모집 중"}</span>
+      <div class="row"><b class="sp" style="font-size:18px">${esc(p.name)}</b>${liveChip(now, today)}</div>
+      <div class="muted">${p.addr ? `${esc(areaOf(p.addr))} · ` : ""}오늘 배치 ${today}명</div>
+      ${more ? `<div class="kv">
+        <span>학생용 이름</span><span>${esc(p.shown)}</span>
+        <span>주소</span><span>${esc(p.addr) || "-"}</span>
+        <span>담당자</span><span>${esc(p.boss) || "-"}</span>
+        <span>메모</span><span style="white-space:pre-wrap">${esc(p.memo) || "-"}</span>
+        <span>지난 근무자</span><span>${past}명</span>
+      </div>
+      <div class="btns"><button class="btn ghost sm" id="plEdit" style="flex:1">✏️ 업장 정보 고치기</button><button class="btn red sm" id="plDel">🗑 업장 지우기</button></div>` : ""}
+      <button class="more" id="plMore">${more ? "접기 ▲" : "더보기 ▼"}</button>
+    </div>
+    <div class="row" style="margin:14px 2px 8px"><b class="sp" style="font-size:15px">공고 ${js.length}개</b><button class="btn sm" id="addJob">＋ 공고 추가</button></div>
+    ${js.map(placeJobCard).join("") || `<div class="empty">아직 공고가 없어요.<br>[＋ 공고 추가]로 이 업장의 첫 공고를 만들어요<br><span class="muted">(오전조·주말조처럼 근무 파트마다 따로 만들어 두면 편해요)</span></div>`}`;
+  $("#plMore").onclick = () => { MORE["p" + p.id] = !more; renderPlace(id); };
+  $("#plEdit") && ($("#plEdit").onclick = () => (location.hash = `placeEdit=${p.id}`));
+  $("#plDel") && ($("#plDel").onclick = () => confirmDo(`'${p.name}' 업장을 지울까요?\n이 업장 공고 ${js.length}개는 지워지지 않고 '업장 없는 공고'로 옮겨져요.`, async () => {
+    try { await api("placeDel", { id: p.id }); toast("🗑 업장을 지웠어요"); await load(); location.hash = ""; } catch (e) { toast("⚠️ " + e.message); }
+  }));
+  $("#addJob").onclick = () => startNew(p);
+  document.querySelectorAll("[data-pjob]").forEach((c) => (c.onclick = () => (location.hash = `job=${c.dataset.pjob}`)));
+}
+// 🏢 업장 등록·고치기
+function renderPlaceEdit(id) {
+  const p = id === "new" ? { name: "", shown: "", addr: "", boss: "", memo: "" } : (DATA.places ?? []).find((x) => String(x.id) === String(id));
+  if (!p) { location.hash = ""; return; }
+  $("#view").innerHTML = `
+    <button class="back" onclick="history.back()">‹ 뒤로</button>
+    <div class="card">
+      <b style="font-size:17px">${id === "new" ? "🏢 업장 등록" : "✏️ 업장 정보 고치기"}</b>
+      <label class="f">실제 업장 이름 <span class="muted">(관리자만 봐요)</span></label><input id="pName" placeholder="예: 늘푸른세탁" value="${esc(p.name)}">
+      <label class="f">학생에게 보일 이름 <span class="muted">(채널 공고 제목·출근 안내에 들어가요)</span></label><input id="pShown" placeholder="예: 고양시 세탁공장" value="${esc(p.shown)}">
+      <label class="f">📍 주소 <span class="muted">(공고·출근 안내에 들어가요)</span></label><input id="pAddr" placeholder="경기도 고양시 덕이로 264-11" value="${esc(p.addr)}">
+      <label class="f">담당자 · 연락처 <span class="muted">(관리자만)</span></label><input id="pBoss" placeholder="김 실장 010-0000-0000" value="${esc(p.boss)}">
+      <label class="f">메모 <span class="muted">(관리자만)</span></label><textarea id="pMemo" style="min-height:80px" placeholder="점심 제공, 첫날 30분 일찍 등">${esc(p.memo)}</textarea>
+      <div class="btns"><button class="btn big" id="pSave">${id === "new" ? "등록하기" : "저장"}</button></div>
+    </div>`;
+  $("#pSave").onclick = async () => {
+    const place = { id: id === "new" ? null : p.id, name: $("#pName").value, shown: $("#pShown").value, addr: $("#pAddr").value, boss: $("#pBoss").value, memo: $("#pMemo").value };
+    try { haptic(); const r = await api("placeSave", { place }); toast(id === "new" ? "🏢 업장을 등록했어요" : "💾 저장했어요"); await load(); location.replace(`#place=${r.place.id}`); } catch (e) { toast("⚠️ " + e.message); }
+  };
+}
+// ＋ 공고 추가 (업장 안에서) / 📋 이 공고로 새로 만들기 → 공고 칸 채우기 화면
+function startNew(p, from) {
+  Object.assign(F, JSON.parse(F0));
+  Object.assign(NEW, { editId: null, noMedia: false, raw: false, text: "", slots: "", cap: "", pastOpen: false, calOpen: false, tp: null, placeId: p?.id ?? null });
+  NEW.media = [];
+  if (from?.form) { Object.assign(F, JSON.parse(JSON.stringify(from.form)), { dates: [], startDate: "" }); if (F.wePay) F.splitPay = true; NEW.media = (from.media ?? []).map(({ type, id }) => ({ type, id })); NEW.cap = from.cap ?? ""; }
+  else if (from) { NEW.text = from.text; NEW.raw = true; }
+  if (p) { if (!F.title) F.title = p.shown; if (!F.addr) F.addr = p.addr ?? ""; }
+  saveDraft();
+  location.hash = ""; setTab("new");
+}
+// 학생에게 가는 출근 안내 미리보기 (한국어)
+function confirmPreview(j) {
+  const f = j.form || {}, p = placeOf(j);
+  const tr = (a, b) => (a || b ? `${a || "?"} ~ ${b || "?"}` : "");
+  let date = "";
+  if (f.payType === "시간제" && f.dates?.length) date = [...f.dates].sort().map(isoDay).join(", ");
+  else if (f.startDate || f.days?.length) date = [f.startDate ? `${isoDay(f.startDate)}부터` : null, f.days?.length ? [...f.days].sort((a, b) => a - b).map((i) => DAYS[i]).join("·") : null].filter(Boolean).join(" · ");
+  else if (j.date) date = isoDay(j.date);
+  let time = f.payType === "시간제" || !(f.days || []).some((x) => x >= 5) ? tr(f.wdS, f.wdE) : [tr(f.wdS, f.wdE) ? `평일 ${tr(f.wdS, f.wdE)}` : "", tr(f.weS, f.weE) ? `주말 ${tr(f.weS, f.weE)}` : ""].filter(Boolean).join(" / ");
+  if (!time && j.startMin != null) time = `${hhmm(j.startMin)} ~`;
+  return [`✅ 근무가 확정됐어요`, p?.shown || f.title ? `🏢 ${p?.shown || f.title}` : "", date ? `📅 ${date}` : "", time ? `🕘 ${time}` : "", p?.addr || f.addr ? `📍 ${p?.addr || f.addr}` : "", `⏰ 근무 시작 10분 전에는 도착해 주세요.`].filter(Boolean).join("\n");
+}
+
+const SEG = {};
+async function renderJob(id) {
+  const back0 = `<button class="back" onclick="location.hash=''">‹ 뒤로</button>`;
+  $("#view").innerHTML = `${back0}<div class="skel"></div><div class="skel"></div>`;
+  let d;
+  try { d = await api("job", { id }); } catch (e) { $("#view").innerHTML = `${back0}<div class="empty">⚠️ ${esc(e.message)}</div>`; return; }
+  const j = d.job, p = placeOf(j);
+  const placed = new Set(j.placed), noti = new Set(j.notified);
+  const full = !!j.slots && j.placed.length >= j.slots;
+  const seg = SEG[id] ?? (j.closed ? "placed" : "apply");
+  const applyList = d.applicants.filter((a) => !placed.has(Number(a.id)));
+  const placedList = d.applicants.filter((a) => placed.has(Number(a.id)));
+  const list = seg === "placed" ? placedList : applyList;
+  const more = MORE["j" + id];
+  const waiting = unNotified(j);
+  const showAtt = seg === "placed" || (!j.placed.length && d.applicants.some((a) => a.att));
+  const unmarked = (seg === "placed" ? placedList : []).filter((a) => !a.att).length;
+  const stuCard = (a) => `
+    <div class="card">
+      <div class="row"><div class="title sp">${rankPill(a.rank)}${badge(a)} ${esc(a.name)} <span class="muted">${a.gender ?? ""} ${a.age ?? ""}세</span></div>${rankChips(a)}</div>
+      <div class="muted">${a.guest || !a.school ? `정보 없이 지원${a.username ? ` · @${esc(a.username)}` : ""}` : `${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}`}</div>
+      <div class="muted">출근 ${a.workOk} · 빵꾸 ${a.workNo} · 수업 ${a.days?.length ? a.days.join("·") : "없음"}${seg === "placed" ? (noti.has(Number(a.id)) ? " · 📩 안내 보냄" : " · 안내 전") : ` · ${ago(a.appliedAt)} 지원`}</div>
+      ${seg === "apply" ? `<div class="btns" style="margin-top:8px"><button class="btn sm ${full ? "off" : "green"}" data-plc="${a.id}" style="flex:1">⭐ 배치하기</button><button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}</div>`
+        : `<div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-stu="${a.id}" style="flex:1">학생 카드</button>${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}<button class="btn ghost sm" data-unplc="${a.id}">배치 빼기</button></div>`}
+      ${showAtt ? `<div class="grp">근무 당일 — 출근 체크</div>
+      <div class="row" style="gap:6px"><button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}">✅ 출근함</button><button class="att no ${a.att === "no" ? "on" : ""}" data-att="no" data-uid="${a.id}">❌ 안 옴 (빵꾸)</button></div>` : ""}
+      <div class="grp">근무 전 — 취소</div>
+      <div class="row" style="gap:6px"><button class="btn red sm" data-nocancel="${a.id}" style="flex:1">🚫 직전 취소 (빵꾸)</button><button class="btn ghost sm" data-unapply="${a.id}" style="flex:1">↩️ 그냥 취소</button></div>
+    </div>`;
+  $("#view").innerHTML = `
+    <button class="back" id="jBack">‹ ${p ? esc(p.name) : "뒤로"}</button>
+    <div class="card">
+      <div class="row"><b class="sp" style="font-size:18px">${esc(partName(j))}</b>${j.kind === "urgent" && !j.closed ? `<span class="pill urgent">급구</span>` : ""}${jobStatusPill(j)}</div>
+      <div style="font-size:14px;margin-top:4px">📅 ${esc(whenLabel(j))}</div>
+      ${timeLabel(j) || payLabel(j) ? `<div class="muted">${esc([timeLabel(j), payLabel(j)].filter(Boolean).join(" · "))}</div>` : ""}
+      ${more ? `<div class="kv">
+        <span>공고 번호</span><span>#${j.id} · ${j.inGroup ? "채널에 올라감" : "1:1만"}${j.bumpedAt ? ` · ${ago(j.bumpedAt)} 끌올` : ` · ${ago(j.at)}`}</span>
+        <span>지원</span><span>${j.applied}명${j.cap ? ` (지원서 정원 ${j.cap}명)` : ""}${j.slots ? ` · 모집 ${j.slots}명` : ""}</span>
+        <span>업장</span><span><select id="jPlace" style="padding:6px 8px"><option value="">업장 없음</option>${(DATA.places ?? []).map((x) => `<option value="${x.id}" ${x.id === j.placeId ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></span>
       </div>
       <div class="pre">${esc(j.text)}</div>
-      <div class="muted">공고 #${j.id} · 🙋 지원 ${j.applied}${lim ? ` / ${lim}명 (남은 ${left}자리)` : "명"}${j.cap && j.slots ? ` · 모집 ${j.slots}명` : ""} · ${j.inGroup ? "👥 그룹방(채널)" : "📩 1:1만"}</div>
       <div class="btns">
-        ${j.closed ? `<button class="btn ghost sm" id="reopen">🔓 다시 열기</button>` : `<button class="btn red sm" id="close">✅ 모집 완료</button>`}
-        ${j.inGroup || j.where !== "d" ? `<button class="btn sm" id="bump">⬆️ 끌올</button>` : ""}
-        <button class="btn ghost sm" id="editJob">✏️ 수정</button>
+        <button class="btn ghost sm" id="editJob">✏️ 공고 고치기</button>
+        <button class="btn ghost sm" id="copyJob">📋 이 공고로 새로 만들기</button>
+        ${j.closed ? `<button class="btn ghost sm" id="reopen">🔓 다시 모집 중으로</button>` : ""}
+      </div>` : ""}
+      <button class="more" id="jMore">${more ? "접기 ▲" : "더보기 ▼"}</button>
+      <div class="btns">
+        ${!j.closed ? `<button class="btn big" id="finish" style="flex:1">모집 중 · 눌러서 완료</button>` : waiting.length ? `<button class="btn big" id="finish" style="flex:1;background:var(--warn)">📩 배치된 ${waiting.length}명에게 출근 안내 보내기</button>` : ""}
+        ${j.inGroup || j.where !== "d" ? `<button class="btn ghost" id="bump" style="flex:${j.closed && !waiting.length ? 1 : "0 0 auto"}">⬆️ 끌올</button>` : ""}
       </div>
     </div>
-    <div class="row" style="margin:14px 2px 8px"><b class="sp">지원자 ${d.applicants.length}명</b>${d.applicants.length && unmarked ? `<button class="btn sm" id="attall" title="출근·빵꾸를 아직 안 누른 지원자를 모두 출근으로">✅ 전원 출근 완료</button>` : ""}</div>
-    ${d.applicants.length ? d.applicants.map((a) => `
-      <div class="card">
-        <div class="row">
-          <div class="sp">
-            <div class="row"><div class="title sp">${rankPill(a.rank)}${badge(a)} ${esc(a.name)} <span class="muted">${a.gender ?? ""} ${a.age ?? ""}세</span></div>${rankChips(a)}</div>
-            <div class="muted">${a.guest || !a.school ? `정보 없이 지원 (일당·단기)${a.username ? ` · @${esc(a.username)}` : ""}` : `${a.phone ? `<a href="tel:${esc(a.phone)}">📞 ${esc(a.phone)}</a>` : "📞 번호 없음"} · ${esc(a.school)} · TOPIK ${esc(a.topik)}${a.car ? " · 🚗" : ""}`}</div>
-            <div class="muted">출근 ${a.workOk} · 빵꾸 ${a.workNo} · ${ago(a.appliedAt)} 지원</div>
-          </div>
-        </div>
-        <div class="btns" style="margin-top:8px">
-          <button class="btn ghost sm" data-stu="${a.id}">학생 카드</button>
-          ${a.username ? `<button class="btn ghost sm" data-chat="${esc(a.username)}">💬 대화</button>` : ""}
-        </div>
-        <div class="grp">근무 당일 — 출근 체크</div>
-        <div class="row" style="gap:6px">
-          <button class="att ok ${a.att === "ok" ? "on" : ""}" data-att="ok" data-uid="${a.id}">✅ 출근함</button>
-          <button class="att no ${a.att === "no" ? "on" : ""}" data-att="no" data-uid="${a.id}">❌ 안 옴 (빵꾸)</button>
-        </div>
-        <div class="grp">근무 전 — 지원 취소</div>
-        <div class="row" style="gap:6px">
-          <button class="btn red sm" data-nocancel="${a.id}" style="flex:1">🚫 직전 취소 (빵꾸)</button>
-          <button class="btn ghost sm" data-unapply="${a.id}" style="flex:1">↩️ 그냥 취소</button>
-        </div>
-      </div>`).join("") : `<div class="empty">아직 지원자가 없어요</div>`}`;
-  const act = async (fn, msg) => { try { haptic(); await fn(); toast(msg); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); } };
-  $("#close") && ($("#close").onclick = () => tg?.showConfirm ? tg.showConfirm("모집 완료로 할까요? 채널 공고도 '모집 완료'로 바뀌어요.", (ok) => ok && act(() => api("close", { id }), "✅ 모집 완료했어요")) : act(() => api("close", { id }), "✅ 모집 완료했어요"));
-  $("#reopen") && ($("#reopen").onclick = () => act(() => api("reopen", { id }), "🔓 다시 열었어요"));
+    <div class="seg"><button data-seg="apply" class="${seg === "apply" ? "on" : ""}">지원자 ${applyList.length}</button><button data-seg="placed" class="${seg === "placed" ? "on" : ""}">배치 ${j.placed.length}${j.slots ? ` / ${j.slots}` : ""}</button></div>
+    ${seg === "placed" && unmarked ? `<div class="row" style="margin:0 2px 8px"><span class="sp"></span><button class="btn sm" id="attall">✅ 전원 출근 완료</button></div>` : ""}
+    ${list.map(stuCard).join("") || `<div class="empty">${seg === "placed" ? "아직 배치한 학생이 없어요.<br>지원자 칸에서 [⭐ 배치하기]를 눌러요" : "배치 기다리는 지원자가 없어요"}</div>`}
+    <div id="modal"></div>`;
+  const act = async (fn, msg) => { try { haptic(); await fn(); if (msg) toast(msg); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); } };
+  $("#jBack").onclick = () => (location.hash = p ? `place=${p.id}` : "");
+  $("#jMore").onclick = () => { MORE["j" + id] = !more; renderJob(id); };
+  document.querySelectorAll("[data-seg]").forEach((b) => (b.onclick = () => { SEG[id] = b.dataset.seg; renderJob(id); }));
+  $("#jPlace") && ($("#jPlace").onchange = (e) => act(() => api("jobPlace", { id, placeId: e.target.value || null }), "🏢 업장을 바꿨어요"));
+  $("#editJob") && ($("#editJob").onclick = () => startEdit(j));
+  $("#copyJob") && ($("#copyJob").onclick = () => startNew(p, j));
+  $("#reopen") && ($("#reopen").onclick = () => confirmDo("다시 모집 중으로 바꿀까요? 채널 공고도 다시 지원 받기로 바뀌어요.", () => act(() => api("reopen", { id }), "🔓 다시 모집 중이에요")));
   bindRank(() => renderJob(id));
-  $("#editJob").onclick = () => startEdit(j);
   $("#attall") && ($("#attall").onclick = () => act(() => api("attall", { id }), "✅ 기록했어요"));
+  // ⭐ 배치 (꽉 차면 "배치 인원이 찼습니다")
+  const fullMsg = () => (tg?.showAlert ? tg.showAlert(`배치 인원이 찼습니다 (${j.placed.length}/${j.slots}명).\n바꾸려면 배치 칸에서 [배치 빼기]를 먼저 눌러 주세요.`) : alert("배치 인원이 찼습니다"));
+  document.querySelectorAll("[data-plc]").forEach((b) => (b.onclick = async () => {
+    if (full) return fullMsg();
+    try { haptic(); const r = await api("placeStu", { id, uid: b.dataset.plc, on: true }); if (r.full) return fullMsg(); toast("⭐ 배치했어요"); await load(); renderJob(id); } catch (e) { toast("⚠️ " + e.message); }
+  }));
+  document.querySelectorAll("[data-unplc]").forEach((b) => (b.onclick = () => act(() => api("placeStu", { id, uid: b.dataset.unplc, on: false }), "배치에서 뺐어요 (지원자 칸으로)")));
+  // ✅ 모집 완료 → 배치된 학생에게 출근 안내 (팝업에서 미리보기)
+  $("#finish") && ($("#finish").onclick = () => {
+    const n = j.closed ? waiting.length : j.placed.length;
+    $("#modal").innerHTML = `<div class="modal"><div class="card">
+      <b style="font-size:16px">${j.closed ? "출근 안내를 보낼까요?" : "모집 완료로 바꿀까요?"}</b>
+      <div style="margin:8px 0">${n ? `배치된 학생 <b>${n}명</b>에게 출근 안내 메시지를 발송하겠습니다.` : "배치된 학생이 없어서 안내 없이 모집 완료만 해요."}</div>
+      ${n ? `<div class="pre" style="font-size:13px">${esc(confirmPreview(j))}</div><div class="muted" style="font-size:12px">학생에게는 학생 언어로 가요 (위는 한국어 미리보기)</div>` : ""}
+      ${!j.closed && j.slots && j.placed.length < j.slots ? `<div style="color:var(--warn);font-size:13px;margin-top:6px">배치가 아직 ${j.placed.length} / ${j.slots}명이에요. 그래도 완료할 수 있어요.</div>` : ""}
+      <div class="btns"><button class="btn ghost" id="mNo" style="flex:1">취소</button><button class="btn green" id="mYes" style="flex:2">${n ? (j.closed ? "보내기" : "완료하고 보내기") : "모집 완료"}</button></div>
+    </div></div>`;
+    $("#mNo").onclick = () => ($("#modal").innerHTML = "");
+    $("#mYes").onclick = async (e) => {
+      e.currentTarget.disabled = true; e.currentTarget.textContent = "보내는 중…";
+      try { haptic(); const r = await api("finish", { id }); SEG[id] = "placed"; toast(r.sent || r.fail ? `✅ ${r.sent}명에게 출근 안내를 보냈어요${r.fail ? ` · ${r.fail}명 실패(봇 차단 등)` : ""}` : "✅ 모집 완료했어요"); await load(); renderJob(id); } catch (err) { toast("⚠️ " + err.message); $("#modal").innerHTML = ""; }
+    };
+  });
   // ⬆️ 끌올 (11-06): 같은 공고를 지금 내용 그대로 채널 맨 아래로 — 번호·지원자 그대로
   $("#bump") && ($("#bump").onclick = (e) => {
     const b = e.currentTarget;
@@ -392,11 +617,8 @@ async function renderJob(id) {
     tg?.showConfirm ? tg.showConfirm(`채널 맨 아래로 끌올할까요?${j.closed ? " (모집 완료 → 다시 모집 중으로 바뀌어요)" : ""}`, (ok) => ok && go()) : go();
   });
   document.querySelectorAll("[data-att]").forEach((b) => (b.onclick = () => { const cur = b.classList.contains("on"); act(() => api("att", { id, uid: b.dataset.uid, r: cur ? null : b.dataset.att }), cur ? "지웠어요" : b.dataset.att === "ok" ? "✅ 출근" : "❌ 빵꾸"); }));
-  document.querySelectorAll("[data-nocancel]").forEach((b) => (b.onclick = () => {
-    const go = () => act(() => api("nocancel", { id, uid: b.dataset.nocancel }), "🚫 빵꾸로 기록하고 자리를 다시 열었어요");
-    tg?.showConfirm ? tg.showConfirm("직전 취소로 빵꾸 1번을 기록하고, 지원을 취소해 자리를 다시 열까요?", (ok) => ok && go()) : go();
-  }));
-  document.querySelectorAll("[data-unapply]").forEach((b) => (b.onclick = () => (tg?.showConfirm ? tg.showConfirm("이 지원을 취소하고 자리를 다시 열까요?", (ok) => ok && act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요")) : act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요"))));
+  document.querySelectorAll("[data-nocancel]").forEach((b) => (b.onclick = () => confirmDo("직전 취소로 빵꾸 1번을 기록하고, 지원을 취소해 자리를 다시 열까요?", () => act(() => api("nocancel", { id, uid: b.dataset.nocancel }), "🚫 빵꾸로 기록하고 자리를 다시 열었어요"))));
+  document.querySelectorAll("[data-unapply]").forEach((b) => (b.onclick = () => confirmDo("이 지원을 취소하고 자리를 다시 열까요?", () => act(() => api("unapply", { id, uid: b.dataset.unapply }), "↩️ 취소했어요"))));
   document.querySelectorAll("[data-stu]").forEach((b) => (b.onclick = () => (location.hash = `stu=${b.dataset.stu}`)));
   document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => tg?.openTelegramLink(`https://t.me/${b.dataset.chat}`)));
 }
@@ -518,7 +740,7 @@ function renderStudent(id) {
   bindRank(() => renderStudent(id));
   // 업장 = 지금까지 올린 공고 (드롭다운 + 검색)
   const places = [];
-  for (const j of DATA.jobs ?? []) if (j.place && !places.some((p) => p.place === j.place)) places.push({ place: j.place, id: j.id, date: j.date });
+  for (const j of DATA.jobs ?? []) { const nm = placeOf(j) ? `${placeOf(j).name} · ${partName(j)}` : j.place; if (nm && !places.some((p) => p.place === nm)) places.push({ place: nm, id: j.id, date: j.date }); }
   const showList = () => {
     const q = WK.place.trim().toLowerCase();
     const m = places.filter((p) => !q || p.place.toLowerCase().includes(q)).slice(0, 50);
@@ -600,7 +822,7 @@ const timeRange = (a, b) => `<div style="display:grid;gap:6px"><div class="row" 
 // ✏️ 공고 수정 — 새 공고 화면을 그 공고 내용으로 채워서 엶
 function startEdit(j) {
   Object.assign(F, JSON.parse(F0));
-  Object.assign(NEW, { editId: j.id, kind: j.kind, raw: !j.form, text: j.text, slots: j.slots ?? "", cap: j.cap ?? "", pastOpen: false, calOpen: false, tp: null, noMedia: j.textJob === false, media: (j.media ?? []).map(({ type, id }) => ({ type, id })) });
+  Object.assign(NEW, { placeId: j.placeId ?? null, editId: j.id, kind: j.kind, raw: !j.form, text: j.text, slots: j.slots ?? "", cap: j.cap ?? "", pastOpen: false, calOpen: false, tp: null, noMedia: j.textJob === false, media: (j.media ?? []).map(({ type, id }) => ({ type, id })) });
   try { localStorage.removeItem(EDIT_KEY); } catch {}
   if (j.form) Object.assign(F, JSON.parse(JSON.stringify(j.form)));
   if (F.wePay) F.splitPay = true;
@@ -616,7 +838,15 @@ function renderNew() {
   if (NEW.kind === "urgent" && (NEW.off == null || NEW.off > 1)) NEW.off = 0;
   const slotsAuto = (/(\d{1,3})\s*명/.exec(NEW.text) || [])[1];
   const c = (k, v, n) => `<button class="chip ${String(NEW[k]) === String(v) ? "on" : ""}" data-n="${k}" data-v="${v}">${n}</button>`;
+  const pl = (DATA.places ?? []).find((x) => x.id === NEW.placeId) ?? null;
   $("#view").innerHTML = `
+    ${NEW.editId ? "" : `<button class="back" id="newBack">‹ ${pl ? esc(pl.name) : "업장 목록"}</button>
+    <div class="card">
+      <label class="f" style="margin-top:0">🏢 업장</label>
+      <select id="plSel"><option value="">업장 없이 (등록 안 한 곳)</option>${(DATA.places ?? []).map((x) => `<option value="${x.id}" ${x.id === NEW.placeId ? "selected" : ""}>${esc(x.name)} — 학생에겐 “${esc(x.shown)}”</option>`).join("")}</select>
+      <label class="f">공고 이름 <span class="muted">(관리용 · 학생에겐 안 보여요)</span></label>
+      <input data-fp="part" placeholder="예: 오전조 · 주말조 · 평일 B팀" value="${esc(F.part)}">
+    </div>`}
     ${NEW.editId ? `<div class="card" style="background:#FFF2B3;color:#3a2e00"><div class="row"><b class="sp">✏️ 공고 #${NEW.editId} 수정 중</b><button class="btn ghost sm" id="editCancel" type="button">수정 그만두기</button></div><div style="font-size:13px;margin-top:4px">저장하면 채널에 올라간 공고 글도 같이 바뀌어요.</div></div>` : ""}
     <div class="card">
       <label class="f" style="margin-top:0">공고 종류</label>
@@ -719,6 +949,15 @@ function renderNew() {
   $("#mdTake") && ($("#mdTake").onclick = async () => { try { const r = await api("mediaTake"); NEW.media.push(...r.items.slice(0, 10 - NEW.media.length)); POOL = 0; saveDraft(); toast(`📥 ${r.items.length}개 붙였어요`); renderNew(); } catch (e) { toast("⚠️ " + e.message); } });
   saveDraft();
   $("#paySplit") && ($("#paySplit").onclick = () => { F.splitPay = true; renderNew(); });
+  $("#newBack") && ($("#newBack").onclick = () => { location.hash = NEW.placeId ? `place=${NEW.placeId}` : ""; if (!NEW.placeId) setTab("places"); });
+  $("#plSel") && ($("#plSel").onchange = (e) => {
+    const old = (DATA.places ?? []).find((x) => x.id === NEW.placeId);
+    NEW.placeId = e.target.value ? Number(e.target.value) : null;
+    const np = (DATA.places ?? []).find((x) => x.id === NEW.placeId);
+    if (np) { if (!F.title || F.title === old?.shown) F.title = np.shown; if (!F.addr || F.addr === old?.addr) F.addr = np.addr ?? ""; }
+    saveDraft(); renderNew();
+  });
+  document.querySelectorAll("[data-fp]").forEach((el) => (el.oninput = () => { F[el.dataset.fp] = el.value; saveDraft(); }));
   $("#payOne") && ($("#payOne").onclick = () => { F.splitPay = false; F.wePay = ""; renderNew(); });
   $("#editCancel") && ($("#editCancel").onclick = () => { const id = NEW.editId; endEdit(); location.hash = `job=${id}`; });
   // 📅 달력 (시간제 = 여러 날, 주급·월급제 첫 출근일 = 하루)
@@ -799,7 +1038,7 @@ function renderNew() {
           await api("editJob", { id, text: NEW.text, slots: NEW.slots || null, cap: NEW.cap || null, form: NEW.raw ? null : { ...F }, media: NEW.noMedia ? undefined : NEW.media.map(({ type, id }) => ({ type, id })) });
           toast("💾 공고를 고쳤어요");
           endEdit();
-          await load(); setTab("jobs"); location.hash = `job=${id}`;
+          await load(); tab = "places"; location.hash = `job=${id}`;
         } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "💾 수정 저장"; }
       });
     }
@@ -807,12 +1046,12 @@ function renderNew() {
     const go = async () => {
       const btn = $("#send"); btn.disabled = true; btn.textContent = "보내는 중…";
       try {
-        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, cap: NEW.cap || null, media: NEW.media.map(({ type, id }) => ({ type, id })), where: NEW.where, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
+        const r = await api("send", { text: NEW.text, kind: NEW.kind, off: NEW.off, slots: NEW.slots || null, cap: NEW.cap || null, media: NEW.media.map(({ type, id }) => ({ type, id })), where: NEW.where, placeId: NEW.placeId ?? null, form: NEW.raw ? null : { ...F }, filter: { topik: NEW.topik, car: NEW.car, gender: NEW.gender, noFlaky: NEW.noFlaky } });
         toast(`✅ 공고 #${r.id} — ${r.out.join(" · ")}`);
         Object.assign(NEW, { text: "", slots: "", cap: "", raw: false });
-        NEW.media = []; clearDraft();
+        NEW.media = []; NEW.placeId = null; clearDraft();
         Object.assign(F, JSON.parse(F0));
-        await load(); setTab("jobs"); location.hash = `job=${r.id}`;
+        await load(); tab = "places"; location.hash = `job=${r.id}`;
       } catch (e) { toast("⚠️ " + e.message); btn.disabled = false; btn.textContent = "보내기"; }
     };
     tg?.showConfirm ? tg.showConfirm(where, (ok) => ok && go()) : go();

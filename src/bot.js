@@ -1277,7 +1277,7 @@ bot.callbackQuery("md:clear", async (ctx) => {
 });
 // 지원서 정원 (혜승 요청 11-05): 모집 인원과 따로 — 모집 3명이어도 지원은 10명까지 받아서 고르기·빵꾸 대비. 없으면 모집 인원까지
 export const capOf = (j) => j.cap ?? j.slots ?? null;
-export async function createJobRecord({ kind = "normal", off = null, text, slots, cap = null, by, ids = [], form = null, media = [] }) {
+export async function createJobRecord({ kind = "normal", off = null, text, slots, cap = null, by, ids = [], form = null, media = [], placeId = null }) {
   const id = await kv.incr("jobseq");
   const m = /(\d{1,3})\s*명/.exec(text ?? "");
   const job = {
@@ -1298,6 +1298,8 @@ export async function createJobRecord({ kind = "normal", off = null, text, slots
     cap: Number(cap) > 0 ? Number(cap) : null,
     noInfo: false, // 모든 공고 자기소개서 먼저 (11-04)
     form, // 미니앱 칸 채우기 값 → 지난 공고 불러오기 (11-04)
+    placeId: placeId ? Number(placeId) : null, // 🏢 업장 (11-06)
+    placed: [], // ⭐ 배치된 학생 (지원자 중 실제로 보내는 학생)
     media: (Array.isArray(media) ? media : []).filter((m) => m && m.id && (m.type === "photo" || m.type === "video")).slice(0, 10),
   };
   await kv.set(`job:${id}`, job, JOB_TTL);
@@ -1531,6 +1533,7 @@ export async function unapplyJob(api, jobId, uid, username) {
   await kv.del(`jobyes:${jobId}:${uid}`);
   await kv.srem(K.jobApps(jobId), uid);
   await kv.del(K.jobApp(jobId, uid));
+  if ((job.placed ?? []).includes(Number(uid))) { job.placed = job.placed.filter((x) => x !== Number(uid)); await kv.set(`job:${jobId}`, job, JOB_TTL); } // 배치에서도 뺌
   let left = null;
   if (capOf(job)) {
     const taken = await kv.decr(`jobcnt:${jobId}`);
@@ -1686,6 +1689,109 @@ export async function deleteJobs(api, ids) {
   }
   return n;
 }
+// ═════════════ 🏢 업장 · ⭐ 배치 · ✅ 모집 완료 안내 (11-06 혜승 피드백 → 대표 결정) ═════════════
+//  업장 → 공고 → 학생. 업장의 실제 이름은 관리자만, 학생에게는 학생용 이름(shown)만 보임
+const placeKey = (id) => `place:${id}`;
+export async function allPlaces() {
+  const ids = (await kv.smembers("places")) ?? [];
+  return (await kv.mget(ids.map(placeKey))).filter(Boolean).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+}
+export async function savePlace(p, by) {
+  const name = String(p?.name ?? "").trim().slice(0, 60);
+  const shown = String(p?.shown ?? "").trim().slice(0, 60);
+  if (!name) throw new Error("실제 업장 이름을 써 주세요");
+  if (!shown) throw new Error("학생에게 보일 이름을 써 주세요");
+  const id = p.id ? Number(p.id) : await kv.incr("placeseq");
+  const old = p.id ? await kv.get(placeKey(id)) : null;
+  if (p.id && !old) throw new Error("업장을 찾을 수 없어요");
+  const place = { ...(old ?? { id, at: Date.now(), by }), name, shown, addr: String(p.addr ?? "").trim().slice(0, 200), boss: String(p.boss ?? "").trim().slice(0, 100), memo: String(p.memo ?? "").trim().slice(0, 1000), editedAt: Date.now() };
+  await kv.set(placeKey(id), place);
+  await kv.sadd("places", id);
+  return place;
+}
+// 업장 지우기 — 그 업장 공고는 "업장 없음"으로 남음 (공고·학생 기록은 그대로)
+export async function deletePlace(id) {
+  await kv.del(placeKey(Number(id)));
+  await kv.srem("places", Number(id));
+  const jobs = (await kv.mget(((await kv.smembers(K.jobs)) ?? []).map((x) => `job:${x}`))).filter((j) => j && j.placeId === Number(id));
+  for (const j of jobs) { j.placeId = null; await kv.set(`job:${j.id}`, j, JOB_TTL); }
+  return jobs.length;
+}
+export async function setJobPlace(jobId, placeId) {
+  const job = await kv.get(`job:${jobId}`);
+  if (!job) throw new Error("공고를 찾을 수 없어요");
+  if (placeId && !(await kv.get(placeKey(Number(placeId))))) throw new Error("업장을 찾을 수 없어요");
+  job.placeId = placeId ? Number(placeId) : null;
+  await kv.set(`job:${jobId}`, job, JOB_TTL);
+  return job;
+}
+// ⭐ 배치하기 / 배치 빼기 — 모집인원만큼 차면 더 못 넣음 ("배치 인원이 찼습니다")
+export async function placeStudent(jobId, uid, on) {
+  const job = await kv.get(`job:${jobId}`);
+  if (!job) throw new Error("공고를 찾을 수 없어요");
+  uid = Number(uid);
+  job.placed = (job.placed ?? []).filter((x) => x !== uid);
+  if (on) {
+    if (!((await kv.smembers(K.jobApps(jobId))) ?? []).map(Number).includes(uid)) throw new Error("이 공고 지원자가 아니에요");
+    if (job.slots && job.placed.length >= job.slots) throw new Error("FULL");
+    job.placed.push(uid);
+  } else if (job.notified?.[uid]) delete job.notified[uid]; // 다시 배치하면 안내도 다시
+  await kv.set(`job:${jobId}`, job, JOB_TTL);
+  return job;
+}
+// 학생 안내 메시지 — 날짜·시간은 공고 칸에서, 요일은 학생 언어로
+const isoMD = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+const isoDow = (iso) => (new Date(iso + "T00:00:00Z").getUTCDay() + 6) % 7; // 월=0
+export function confirmText(job, place, lang) {
+  const f = job.form ?? {};
+  const wd = tx(lang, "cfWd");
+  const day = (iso) => `${isoMD(iso)} (${wd[isoDow(iso)]})`;
+  let date = null;
+  if (f.payType === "시간제" && f.dates?.length) date = [...f.dates].sort().map(day).join(", ");
+  else if (f.startDate || f.days?.length) date = [f.startDate ? tx(lang, "cfFrom").replace("{d}", day(f.startDate)) : null, f.days?.length ? [...f.days].sort((a, b) => a - b).map((i) => wd[i]).join(", ") : null].filter(Boolean).join(" · ");
+  else if (job.date) date = day(job.date);
+  const tr = (a, b) => (a || b ? `${a || "?"} ~ ${b || "?"}` : null);
+  let time = null;
+  if (f.payType === "시간제" || !(f.days ?? []).some((x) => x >= 5)) time = tr(f.wdS, f.wdE);
+  else {
+    const wdDays = f.days.filter((x) => x < 5), weDays = f.days.filter((x) => x >= 5);
+    time = [wdDays.length && tr(f.wdS, f.wdE) ? `${wdDays.map((i) => wd[i]).join(", ")}: ${tr(f.wdS, f.wdE)}` : null, weDays.length && tr(f.weS, f.weE) ? `${weDays.map((i) => wd[i]).join(", ")}: ${tr(f.weS, f.weE)}` : null].filter(Boolean).join("\n") || null;
+  }
+  if (!time && job.startMin != null) time = `${String(Math.floor(job.startMin / 60)).padStart(2, "0")}:${String(job.startMin % 60).padStart(2, "0")} ~`;
+  const addr = place?.addr || f.addr || null;
+  const name = place?.shown || f.title || null;
+  return [
+    tx(lang, "cfTitle"),
+    "",
+    name ? `${tx(lang, "cfPlace")}: <b>${esc(name)}</b>` : null,
+    date ? `${tx(lang, "cfDate")}: <b>${esc(date)}</b>` : null,
+    time ? `${tx(lang, "cfTime")}: <b>${esc(time)}</b>` : null,
+    addr ? `${tx(lang, "cfAddr")}: ${esc(addr)}` : null,
+    "",
+    tx(lang, "cfArrive"),
+  ].filter((x) => x !== null).join("\n");
+}
+// ✅ 모집 완료 + 배치된 학생에게 1:1 출근 안내 (이미 안내 받은 학생은 빼고 보냄)
+export async function finishJob(api, jobId) {
+  let job = await kv.get(`job:${jobId}`);
+  if (!job) throw new Error("공고를 찾을 수 없어요");
+  if (!job.closed) { await closeJob(api, job); job = await kv.get(`job:${jobId}`); }
+  const place = job.placeId ? await kv.get(placeKey(job.placeId)) : null;
+  job.notified ??= {};
+  const targets = (job.placed ?? []).filter((u) => !job.notified[u]);
+  let sent = 0, fail = 0;
+  for (const uid of targets) {
+    const app = await kv.get(K.app(uid));
+    const lang = app?.lang ?? (await kv.get(`lang:${uid}`)) ?? "uz";
+    const ok = await api.sendMessage(uid, confirmText(job, place, lang), { ...html, link_preview_options: { is_disabled: true } }).then(() => true).catch(() => false);
+    if (ok) { job.notified[uid] = Date.now(); sent++; } else fail++;
+    await sleep(40);
+  }
+  job.finishedAt ??= Date.now();
+  await kv.set(`job:${jobId}`, job, JOB_TTL);
+  return { sent, fail };
+}
+
 export async function removeManualNoShow(uid, at) {
   const app = await kv.get(K.app(uid));
   if (!app) throw new Error("학생을 찾을 수 없어요");
@@ -1743,8 +1849,15 @@ const attKeyboard = (job, apps) => {
   return kb.text("✅ 나머지 모두 출근했어요", `a:attall:${job.id}`);
 };
 
+// 출근 확인 대상 = 배치된 학생 (배치한 사람이 없으면 예전처럼 지원자 모두)
+export async function attendees(jobOrId) {
+  const job = typeof jobOrId === "object" ? jobOrId : await kv.get(`job:${jobOrId}`);
+  const apps = await jobApplicants(job?.id ?? jobOrId);
+  const placed = job?.placed ?? [];
+  return placed.length ? apps.filter((a) => placed.includes(Number(a.id))) : apps;
+}
 async function askAttendance(api, job) {
-  const apps = await jobApplicants(job.id);
+  const apps = await attendees(job);
   if (!apps.length) return false;
   for (const a of await notifyIds(api)) {
     await api.sendMessage(a, attText(job, apps), { ...html, reply_markup: attKeyboard(job, apps) }).catch(() => {});
@@ -1763,7 +1876,7 @@ export async function checkAttendance(api) {
     if (job.attDone) continue;
     const day = job.date ?? (job.closedAt ? new Date(job.closedAt + 9 * 3600e3 + DAY).toISOString().slice(0, 10) : null);
     if (!day) continue;
-    const apps = (await kv.smembers(K.jobApps(job.id))) ?? [];
+    const apps = job.placed?.length ? job.placed : (await kv.smembers(K.jobApps(job.id))) ?? [];
     if (!apps.length) continue;
     const allMarked = apps.every((u) => job.att?.[u]);
     if (allMarked) {
@@ -1791,7 +1904,7 @@ bot.callbackQuery(/^a:att:(\d+):(\d+):(ok|no)$/, async (ctx) => {
   const job = await setAttendance(jobId, uid, r);
   if (!job) return ctx.answerCallbackQuery({ text: "공고를 찾을 수 없어요.", show_alert: true });
   await ctx.answerCallbackQuery({ text: r === "ok" ? "✅ 출근" : "❌ 빵꾸" });
-  const apps = await jobApplicants(jobId);
+  const apps = await attendees(jobId);
   // 모두 체크하면 버튼을 거두고 결과 명단으로 마무리 (고칠 땐 관리 미니앱 공고 카드에서)
   if (apps.every((a) => job.att?.[a.id])) {
     job.attDone = true;
@@ -1803,7 +1916,7 @@ bot.callbackQuery(/^a:att:(\d+):(\d+):(ok|no)$/, async (ctx) => {
 bot.callbackQuery(/^a:attall:(\d+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   const jobId = ctx.match[1];
-  const apps = await jobApplicants(jobId);
+  const apps = await attendees(jobId);
   let job = await kv.get(`job:${jobId}`);
   if (!job) return ctx.answerCallbackQuery();
   for (const a of apps) if (!job.att?.[a.id]) job = await setAttendance(jobId, a.id, "ok");

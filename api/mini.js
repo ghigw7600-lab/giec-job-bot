@@ -32,6 +32,13 @@ import {
   deleteJobs,
   refreshChanAdmins,
   mediaKey,
+  allPlaces,
+  savePlace,
+  deletePlace,
+  setJobPlace,
+  placeStudent,
+  finishJob,
+  attendees,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -117,6 +124,11 @@ async function jobView(job) {
     kindPay: job.form?.payType ?? null,
     place: job.form?.title ?? first(job).replace(/^📢\s*\[GIEC JOB\]\s*/, "").replace(/\s*모집!?\s*$/, ""),
     off: job.off ?? null,
+    startMin: job.startMin ?? null,
+    placeId: job.placeId ?? null,
+    placed: (job.placed ?? []).map(Number),
+    placedNo: (job.placed ?? []).filter((u) => att[u] === "no").length,
+    notified: Object.keys(job.notified ?? {}).map(Number),
   };
 }
 
@@ -140,6 +152,7 @@ const ADMIN = {
     const filled = week.reduce((s, j) => s + Math.min(j.applied, j.slots ?? j.applied), 0);
     return {
       jobs,
+      places: await allPlaces(),
       students,
       template: JOB_TEMPLATE,
       stats: {
@@ -163,6 +176,31 @@ const ADMIN = {
       job: await jobView(job),
       applicants: apps.map((a, i) => ({ ...studentView(a), appliedAt: times[i]?.at ?? null, att: job.att?.[a.id] ?? null })),
     };
+  },
+  // 🏢 업장 등록·고치기·지우기, 공고를 업장에 연결
+  async placeSave({ place }) {
+    return { ok: true, place: await savePlace(place ?? {}, this.who) };
+  },
+  async placeDel({ id }) {
+    return { ok: true, n: await deletePlace(id) };
+  },
+  async jobPlace({ id, placeId }) {
+    await setJobPlace(Number(id), placeId ? Number(placeId) : null);
+    return { ok: true };
+  },
+  // ⭐ 배치하기 / 배치 빼기
+  async placeStu({ id, uid, on }) {
+    try {
+      const job = await placeStudent(Number(id), Number(uid), !!on);
+      return { ok: true, placed: job.placed };
+    } catch (e) {
+      if (e.message === "FULL") return { ok: false, full: true };
+      throw e;
+    }
+  },
+  // ✅ 모집 완료 + 배치된 학생에게 출근 안내
+  async finish({ id }) {
+    return { ok: true, ...(await finishJob(bot.api, Number(id))) };
   },
   async unapply({ id, uid }) {
     return unapplyJob(bot.api, id, uid, await botName());
@@ -268,7 +306,7 @@ const ADMIN = {
     return { ok: true };
   },
   async attall({ id }) {
-    const apps = await jobApplicants(id);
+    const apps = await attendees(Number(id));
     let job = await kv.get(`job:${id}`);
     for (const a of apps) if (!job.att?.[a.id]) job = await setAttendance(id, a.id, "ok");
     job.attDone = true;
@@ -294,12 +332,12 @@ const ADMIN = {
     return { count: list.length, sample: list.slice(0, 50).map(studentView) };
   },
   // 새 공고 보내기
-  async send({ text, kind, off, slots, cap, where, filter, form, media }) {
+  async send({ text, kind, off, slots, cap, where, filter, form, media, placeId }) {
     if (!String(text ?? "").trim()) throw new Error("공고 내용을 써 주세요");
     if (!["g", "d", "b"].includes(where)) throw new Error("보낼 곳을 골라 주세요");
     const f = normFilter({ ...filter, off });
     const ids = where === "g" ? [] : (await findStudents(f)).map((a) => a.id);
-    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, media: (Array.isArray(media) ? media : []).filter((m) => m && typeof m.id === "string" && (m.type === "photo" || m.type === "video")).map((m) => ({ type: m.type, id: m.id })), by: this.who, ids, form: form && typeof form === "object" ? form : null });
+    const job = await createJobRecord({ kind: kind === "urgent" ? "urgent" : "normal", off: off == null ? null : Number(off), text: String(text).trim(), slots, cap, media: (Array.isArray(media) ? media : []).filter((m) => m && typeof m.id === "string" && (m.type === "photo" || m.type === "video")).map((m) => ({ type: m.type, id: m.id })), by: this.who, ids, form: form && typeof form === "object" ? form : null, placeId: placeId ? Number(placeId) : null });
     const out = await sendJobOut(bot.api, job, where, await botName());
     return { ok: true, id: job.id, out };
   },

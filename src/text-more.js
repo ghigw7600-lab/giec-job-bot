@@ -275,3 +275,16 @@ export const REFER = {
   vi: { refIntro: "🤝 <b>Mời bạn bè du học Hàn Quốc!</b>\n\nGửi đường link của bạn cho bạn bè bằng nút bên dưới. Nếu bạn bè nhắn GIECbot qua link này, bạn sẽ được ghi nhận là người giới thiệu 🎁\n\n🔗 Link của bạn:\n{link}", refShare: "🇰🇷 Bạn muốn du học Hàn Quốc? Tư vấn miễn phí cùng GIEC 👇", refBtn: "📤 Gửi cho bạn bè" },
   th: { refIntro: "🤝 <b>ชวนเพื่อนมาเรียนที่เกาหลี!</b>\n\nส่งลิงก์ของคุณให้เพื่อนด้วยปุ่มด้านล่าง ถ้าเพื่อนทักหา GIECbot ผ่านลิงก์นี้ คุณจะถูกบันทึกเป็นผู้แนะนำ 🎁\n\n🔗 ลิงก์ของคุณ:\n{link}", refShare: "🇰🇷 อยากเรียนที่เกาหลีไหม? ปรึกษาฟรีกับ GIEC 👇", refBtn: "📤 ส่งให้เพื่อน" },
 };
+
+// ✅ 배치 확정 · 출근 안내 (관리 미니앱 공고 [모집 완료하고 안내 보내기], 11-06 대표 결정) — 7개 언어
+//   {place} 학생용 업장 이름 · {date} 날짜 · {time} 시간 · {addr} 주소(한글 그대로)
+//   cfWd = 요일 (월요일부터) · cfFrom = "{d}부터"
+export const CONFIRM = {
+  uz: { cfTitle: "✅ <b>Siz ishga tanlandingiz!</b>", cfPlace: "🏢 Ish joyi", cfDate: "📅 Sana", cfTime: "🕘 Vaqt", cfAddr: "📍 Manzil", cfArrive: "⏰ Iltimos, ish boshlanishidan <b>10 daqiqa oldin</b> yetib keling.", cfFrom: "{d} dan boshlab", cfWd: ["Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya"] },
+  ru: { cfTitle: "✅ <b>Вас выбрали на работу!</b>", cfPlace: "🏢 Место", cfDate: "📅 Дата", cfTime: "🕘 Время", cfAddr: "📍 Адрес", cfArrive: "⏰ Пожалуйста, приходите <b>за 10 минут</b> до начала работы.", cfFrom: "с {d}", cfWd: ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] },
+  ky: { cfTitle: "✅ <b>Сиз жумушка тандалдыңыз!</b>", cfPlace: "🏢 Жумуш орду", cfDate: "📅 Күнү", cfTime: "🕘 Убактысы", cfAddr: "📍 Дареги", cfArrive: "⏰ Сураныч, жумуш башталардан <b>10 мүнөт мурун</b> келиңиз.", cfFrom: "{d} баштап", cfWd: ["Дш", "Шй", "Шр", "Бш", "Жм", "Иш", "Жк"] },
+  en: { cfTitle: "✅ <b>You have been selected for the job!</b>", cfPlace: "🏢 Workplace", cfDate: "📅 Date", cfTime: "🕘 Time", cfAddr: "📍 Address", cfArrive: "⏰ Please arrive <b>10 minutes before</b> work starts.", cfFrom: "from {d}", cfWd: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+  mn: { cfTitle: "✅ <b>Та ажилд сонгогдлоо!</b>", cfPlace: "🏢 Ажлын байр", cfDate: "📅 Огноо", cfTime: "🕘 Цаг", cfAddr: "📍 Хаяг", cfArrive: "⏰ Ажил эхлэхээс <b>10 минутын өмнө</b> ирнэ үү.", cfFrom: "{d}-ээс эхлэн", cfWd: ["Да", "Мя", "Лх", "Пү", "Ба", "Бя", "Ня"] },
+  vi: { cfTitle: "✅ <b>Bạn đã được chọn cho công việc!</b>", cfPlace: "🏢 Nơi làm việc", cfDate: "📅 Ngày", cfTime: "🕘 Giờ", cfAddr: "📍 Địa chỉ", cfArrive: "⏰ Vui lòng đến <b>trước 10 phút</b> khi bắt đầu làm việc.", cfFrom: "từ {d}", cfWd: ["T2", "T3", "T4", "T5", "T6", "T7", "CN"] },
+  th: { cfTitle: "✅ <b>คุณได้รับเลือกให้ทำงานแล้ว!</b>", cfPlace: "🏢 สถานที่ทำงาน", cfDate: "📅 วันที่", cfTime: "🕘 เวลา", cfAddr: "📍 ที่อยู่", cfArrive: "⏰ กรุณามาถึง<b>ก่อนเริ่มงาน 10 นาที</b>", cfFrom: "ตั้งแต่ {d}", cfWd: ["จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา."] },
+};
