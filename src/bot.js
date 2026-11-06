@@ -592,14 +592,14 @@ admin.command("pinpost", async (ctx) => {
 });
 
 // /refpost : 🤝 친구 소개 이벤트 포스터 → 채널 (버튼 2개)
-//   [🎓 유학 상담] = GIECbot 직접 상담 (추천인 없음, 채널 학생 본인용)
+//   [🎓 비자 전환] = GIECbot 직접 상담 (추천인 없음, 채널 학생 본인 D-4→D-2용)
 //   [🔗 내 소개 링크] = 이 봇이 학생마다 GIECbot 개인 소개 링크를 줌 → 친구에게 보내기
 //  쓰는 법: /refpost → 포스터 사진(+설명 글)을 보냄 → 미리보기 → [✅ 채널에 올리기]
 //          (사진 설명 칸에 /refpost 를 쓰고 바로 보내도 됨)
 const refKey = (id) => `refpost:${id}`;
 const refKeyboard = (botName) =>
   new InlineKeyboard()
-    .url("🎓 Koreyada o'qish · Учёба в Корее", `https://t.me/${GIECBOT()}?start=go-fr`)
+    .url("🎓 Viza o'zgartirish · Смена визы", `https://t.me/${GIECBOT()}?start=go-fr`)
     .row()
     .url("🔗 Taklif havolam · Моя ссылка", `https://t.me/${botName}?start=ref`);
 const isPoster = (m) => !!(m.photo || m.document || m.video || m.animation);
