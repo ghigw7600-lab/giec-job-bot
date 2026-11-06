@@ -86,7 +86,7 @@
   .pill.live { background: #e5f6ec; color: #13723f; font-weight: 700; }
   .pill.wait { background: #fff2b3; color: #6b5200; font-weight: 700; }
   .pill.blue { background: #e3efff; color: #1f5fbf; }
-  [data-place], [data-pjob] { cursor: pointer; }
+  [data-place], [data-pjob], [data-go] { cursor: pointer; }
   .more { border: 0; background: none; color: var(--link); font-size: 13px; padding: 6px 0 0; }
   .kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px 10px; font-size: 14px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .kv > span:nth-child(odd) { color: var(--hint); font-size: 13px; }
@@ -289,6 +289,7 @@ function render() {
   if (h.startsWith("stu=")) return renderStudent(h.slice(4));
   if (h.startsWith("place=")) return renderPlace(h.slice(6));
   if (h.startsWith("placeEdit=")) return renderPlaceEdit(h.slice(10));
+  if (h === "now" || h === "wait") return renderPeople(h);
   if (h.startsWith("new")) { // 봇 /find 에서 [📝 양식 채우기] → #new=urgent:0
     const [k, o] = (h.split("=")[1] ?? "").split(":");
     if (k) { NEW.kind = k === "normal" ? "normal" : "urgent"; NEW.off = o === "" || o == null ? null : Number(o); }
@@ -405,16 +406,16 @@ function renderPlaces() {
   const loose = DATA.jobs.filter((j) => !placeOf(j));
   const nowSum = DATA.jobs.reduce((s, j) => s + workingN(j), 0);
   const open = DATA.jobs.filter((j) => !j.closed);
-  const waitN = open.reduce((s, j) => s + Math.max(0, j.applied - (j.placed?.length ?? 0)), 0);
+  const waitN = peopleRows("wait").length;
   const rows = P.map((p) => {
     const js = jobsOf(p.id);
     return { p, js, now: js.reduce((s, j) => s + workingN(j), 0), today: js.reduce((s, j) => s + todayN(j), 0), open: js.filter((j) => !j.closed).length, last: Math.max(p.at ?? 0, ...js.map((j) => j.bumpedAt ?? j.at ?? 0)) };
   }).sort((a, b) => b.now - a.now || b.today - a.today || b.open - a.open || b.last - a.last);
   $("#view").innerHTML = `
     <div class="sum">
-      <div class="card"><span class="muted">지금 근무 중</span><b style="color:var(--ok)">${nowSum}명</b></div>
-      <div class="card"><span class="muted">모집 중 공고</span><b style="color:var(--link)">${open.length}개</b></div>
-      <div class="card"><span class="muted">배치 기다림</span><b style="color:var(--warn)">${waitN}명</b></div>
+      <div class="card" data-go="now"><span class="muted">지금 근무 중</span><b style="color:var(--ok)">${nowSum}명</b></div>
+      <div class="card" data-go="open"><span class="muted">모집 중 공고</span><b style="color:var(--link)">${open.length}개</b></div>
+      <div class="card" data-go="wait"><span class="muted">배치 기다림</span><b style="color:var(--warn)">${waitN}명</b></div>
     </div>
     <button class="btn ghost big" id="addPlace" style="margin-bottom:10px;border:1.5px dashed var(--btn);background:none;color:var(--link)">＋ 업장 등록</button>
     ${rows.map(({ p, js, now, today, open }) => `
@@ -425,9 +426,42 @@ function renderPlaces() {
       </div>`).join("") || `<div class="empty">아직 등록한 업장이 없어요.<br>위 [＋ 업장 등록]으로 시작하세요.</div>`}
     ${loose.length ? `<div class="card" data-place="none" style="background:none;border:1px dashed var(--line)"><div class="row"><b class="sp">📂 업장 없는 공고</b><span class="pill">${loose.length}개</span></div><div class="muted">예전 공고 · 공고 안 [더보기]에서 업장을 연결할 수 있어요</div></div>` : ""}`;
   $("#addPlace").onclick = () => (location.hash = "placeEdit=new");
+  document.querySelectorAll("[data-go]").forEach((c) => (c.onclick = () => {
+    if (c.dataset.go === "open") { jobFilter = "open"; location.hash = ""; setTab("jobs"); }
+    else location.hash = c.dataset.go;
+  }));
   document.querySelectorAll("[data-place]").forEach((c) => (c.onclick = () => (location.hash = `place=${c.dataset.place}`)));
 }
 
+// 👥 지금 근무 중 / 배치 기다림 — 학생 카드(지원자·배치 칸과 같은 정보) + 어느 업장인지
+function peopleRows(kind) {
+  const map = new Map();
+  for (const j of DATA.jobs) {
+    let uids = [];
+    if (kind === "now") { if (sched(j).now) uids = (j.placed ?? []).filter((u) => !(j.noIds ?? []).includes(u)); }
+    else if (!j.closed) uids = (j.apps ?? []).filter((u) => !(j.placed ?? []).includes(u));
+    for (const u of uids) { if (!map.has(u)) map.set(u, []); map.get(u).push(j); }
+  }
+  return [...map.entries()].map(([uid, jobs]) => ({ s: DATA.students.find((x) => Number(x.id) === uid) ?? { id: uid, name: `#${uid}`, guest: true, workOk: 0, workNo: 0, days: [] }, jobs }));
+}
+function renderPeople(kind) {
+  const rows = peopleRows(kind);
+  const where = (j) => `${placeOf(j) ? esc(placeOf(j).name) : "업장 없음"} · ${esc(partName(j))}`;
+  $("#view").innerHTML = `
+    <button class="back" onclick="location.hash=''">‹ 업장 목록</button>
+    <div class="card"><b style="font-size:17px">${kind === "now" ? "🟢 지금 근무 중" : "⏳ 배치 기다림"} ${rows.length}명</b>
+      <div class="muted">${kind === "now" ? "지금 근무시간인 공고에 배치된 학생 (빵꾸 표시한 학생 빼고)" : "모집 중 공고에 지원했지만 아직 배치 안 한 학생"}</div></div>
+    ${rows.map(({ s, jobs }) => `
+      <div class="card">
+        <div class="row"><div class="title sp">${rankPill(s.rank)}${badge(s)} ${esc(s.name)} <span class="muted">${s.gender ?? ""} ${s.age ? s.age + "세" : ""}</span></div></div>
+        <div class="muted">${s.guest || !s.school ? `정보 없이 지원${s.username ? ` · @${esc(s.username)}` : ""}` : `${s.phone ? `<a href="tel:${esc(s.phone)}">📞 ${esc(s.phone)}</a>` : "📞 번호 없음"} · ${esc(s.school)} · TOPIK ${esc(s.topik)}`}</div>
+        <div class="muted">출근 ${s.workOk ?? 0} · 빵꾸 ${s.workNo ?? 0} · 수업 ${s.days?.length ? s.days.join("·") : "없음"}</div>
+        <div style="margin-top:6px;font-size:14px">${jobs.map((j) => `<a href="#job=${j.id}" style="display:block">🏢 ${kind === "now" ? "근무 중" : "지원"}: <b>${where(j)}</b>${kind === "now" && timeLabel(j) ? ` <span class="muted">${esc(timeLabel(j))}</span>` : ""}</a>`).join("")}</div>
+        <div class="btns" style="margin-top:8px"><button class="btn ghost sm" data-stu="${s.id}" style="flex:1">학생 카드</button>${s.username ? `<button class="btn ghost sm" data-chat="${esc(s.username)}">💬 대화</button>` : ""}</div>
+      </div>`).join("") || `<div class="empty">${kind === "now" ? "지금 근무 중인 학생이 없어요" : "배치 기다리는 학생이 없어요"}</div>`}`;
+  document.querySelectorAll("[data-stu]").forEach((b) => (b.onclick = () => (location.hash = `stu=${b.dataset.stu}`)));
+  document.querySelectorAll("[data-chat]").forEach((b) => (b.onclick = () => tg?.openTelegramLink(`https://t.me/${b.dataset.chat}`)));
+}
 const placeJobCard = (j) => `
   <div class="card" data-pjob="${j.id}">
     <div class="row"><b class="sp" style="font-size:16px">${esc(partName(j))}</b>${j.kind === "urgent" && !j.closed ? `<span class="pill urgent">급구</span>` : ""}${jobStatusPill(j)}</div>

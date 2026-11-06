@@ -128,6 +128,8 @@ async function jobView(job) {
     placeId: job.placeId ?? null,
     placed: (job.placed ?? []).map(Number),
     placedNo: (job.placed ?? []).filter((u) => att[u] === "no").length,
+    noIds: (job.placed ?? []).filter((u) => att[u] === "no").map(Number), // 배치됐지만 빵꾸
+    apps: ids.map(Number), // 지원자 (업장 탭 "배치 기다림" 목록)
     notified: Object.keys(job.notified ?? {}).map(Number),
   };
 }
