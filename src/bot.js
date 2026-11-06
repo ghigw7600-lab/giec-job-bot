@@ -1356,6 +1356,15 @@ bot.callbackQuery(/^p:send:(\d+):(g|d|b)$/, async (ctx) => {
 
 // 📢 다시 올리기: 빵꾸 등으로 다시 뽑을 때 — 남은 인원으로 새 공고를 맨 아래에 올리고 예전 공고는 마감
 export async function repostJob(api, old, username, slots) {
+  // (11-06) 같은 공고가 여러 개 열려 있던 문제: 두 번 눌림 / 예전 공고에서 또 다시 올림
+  const prev = old.repostedTo ? await kv.get(`job:${old.repostedTo}`) : null;
+  // 1분 안에 또 누른 건 두 번 눌림으로 보고 방금 올린 공고를 그대로 돌려줌
+  if (prev && !prev.closed && Date.now() - (prev.at ?? 0) < 60e3) return { job: prev, out: [] };
+  // 이 공고에서 이미 다시 올린 공고들(사슬)이 열려 있으면 모두 마감 — 새로 올리는 공고 하나만 남김
+  for (let next = prev, n = 0; next && n < 20; n++) {
+    if (!next.closed) await closeJob(api, next);
+    next = next.repostedTo ? await kv.get(`job:${next.repostedTo}`) : null;
+  }
   const id = await kv.incr("jobseq");
   const job = {
     ...old,
@@ -1377,6 +1386,39 @@ export async function repostJob(api, old, username, slots) {
   else await kv.set(`job:${old.id}`, old, JOB_TTL);
   const out = await sendJobOut(api, job, "g", username);
   return { job, out };
+}
+
+// ⬆️ 끌올 (11-06 대표 요청, 당근마켓 끌올처럼): 같은 공고(번호·지원자·출근 기록 그대로)를 채널 맨 아래로.
+// 지금 내용(수정한 글·사진 포함)으로 새로 올리고 예전 글은 지움. 텔레그램은 48시간 지난 글을 못 지워서
+// 그땐 예전 글을 "⬆️ 아래로 끌올됐어요"로 바꾸고 버튼을 없앰. 모집 완료였으면 다시 모집 중으로.
+export async function bumpJob(api, job, username) {
+  const ch = job.group ? { id: job.group.chat } : await kv.get(K.channel);
+  if (!ch) throw new Error("그룹방(채널)을 아직 몰라요");
+  if (Date.now() - (job.bumpedAt ?? 0) < 30e3) return job; // 두 번 눌림
+  job.closed = false;
+  let msg;
+  try {
+    msg = await sendTo(api, ch.id, job, groupBody(job), groupMarkup(username, job.id));
+  } catch (e) { throw new Error("채널에 못 올렸어요: " + (e.description ?? e.message)); }
+  const old = job.group;
+  job.group = { chat: ch.id, msgId: msg.message_id, ...(msg.isCaption ? { caption: true } : {}), ...(msg.album ? { album: msg.album } : {}) };
+  job.bumpedAt = Date.now();
+  job.bumps = (job.bumps ?? 0) + 1;
+  await kv.set(`job:${job.id}`, job, JOB_TTL);
+  await kv.sadd(K.jobs, job.id);
+  if (old) {
+    const gone = await api.deleteMessage(old.chat, old.msgId).then(() => true).catch(() => false);
+    for (const a of old.album ?? []) await api.deleteMessage(old.chat, a).catch(() => {});
+    if (!gone) {
+      const note = "⬆️ <b>이 공고는 아래로 끌올됐어요</b> — 맨 아래 새 글에서 지원해 주세요";
+      const mk = closedMarkup(username);
+      await (job.text != null && !old.caption
+        ? api.editMessageText(old.chat, old.msgId, note, { parse_mode: "HTML", reply_markup: mk })
+        : api.editMessageCaption(old.chat, old.msgId, { caption: note, parse_mode: "HTML", reply_markup: mk })
+      ).catch(() => {});
+    }
+  }
+  return job;
 }
 
 // 마감: 그룹방 공고에 표시 + 버튼 없앰, 1:1 버튼도 더는 안 받음

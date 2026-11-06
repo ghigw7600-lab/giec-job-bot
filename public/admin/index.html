@@ -326,7 +326,7 @@ const jobCard = (j) => `
       <span class="pill ${j.closed ? "closed" : "open"}">${j.closed ? "✅ 모집 완료" : "모집 중"}</span>
     </div>
     <div class="title" style="margin-top:6px">#${j.id} ${esc(j.title)}</div>
-    <div class="muted">🙋 지원 ${j.applied}${j.cap ? ` / ${j.cap}명 · 모집 ${j.slots ?? "?"}명` : j.slots ? ` / ${j.slots}명` : "명"}${j.attOk || j.attNo ? ` · ✅ ${j.attOk} ❌ ${j.attNo}` : ""} · ${ago(j.at)}${j.repostOf ? ` · #${j.repostOf} 다시 올림` : ""}</div>
+    <div class="muted">🙋 지원 ${j.applied}${j.cap ? ` / ${j.cap}명 · 모집 ${j.slots ?? "?"}명` : j.slots ? ` / ${j.slots}명` : "명"}${j.attOk || j.attNo ? ` · ✅ ${j.attOk} ❌ ${j.attNo}` : ""} · ${j.bumpedAt ? `⬆️ ${ago(j.bumpedAt)} 끌올` : ago(j.at)}${j.repostOf ? ` · #${j.repostOf} 다시 올림` : ""}</div>
   </div>`;
 
 async function renderJob(id) {
@@ -350,7 +350,7 @@ async function renderJob(id) {
       <div class="muted">공고 #${j.id} · 🙋 지원 ${j.applied}${lim ? ` / ${lim}명 (남은 ${left}자리)` : "명"}${j.cap && j.slots ? ` · 모집 ${j.slots}명` : ""} · ${j.inGroup ? "👥 그룹방(채널)" : "📩 1:1만"}</div>
       <div class="btns">
         ${j.closed ? `<button class="btn ghost sm" id="reopen">🔓 다시 열기</button>` : `<button class="btn red sm" id="close">✅ 모집 완료</button>`}
-        <button class="btn sm" id="repost">📢 다시 올리기</button>
+        ${j.inGroup || j.where !== "d" ? `<button class="btn sm" id="bump">⬆️ 끌올</button>` : ""}
         <button class="btn ghost sm" id="editJob">✏️ 수정</button>
       </div>
     </div>
@@ -385,14 +385,13 @@ async function renderJob(id) {
   bindRank(() => renderJob(id));
   $("#editJob").onclick = () => startEdit(j);
   $("#attall") && ($("#attall").onclick = () => act(() => api("attall", { id }), "✅ 기록했어요"));
-  $("#repost").onclick = () => {
-    // 몇 명 다시 뽑을지 입력칸 (텔레그램 안에서는 prompt 창이 안 뜨는 폰이 있어서 화면에 직접)
-    const box = $("#repost").parentElement;
-    box.innerHTML = `<div style="width:100%"><label class="f" style="margin-top:0">몇 명 다시 모집할까요? <span class="muted">(비우면 인원 안 셈)</span></label>
-      <div class="row"><input id="rs" inputmode="numeric" value="${left ?? j.slots ?? ""}" class="sp"><button class="btn sm" id="rsGo">📢 맨 아래에 다시 올리기</button></div>
-      <div class="muted" style="margin-top:6px">새 공고가 그룹방(채널) 맨 아래에 🚨 급구로 올라가고, 이 공고는 모집 완료로 바뀌어요.</div></div>`;
-    $("#rsGo").onclick = () => act(async () => { const r = await api("repost", { id, slots: $("#rs").value || null }); location.hash = `job=${r.id}`; }, "📢 맨 아래에 다시 올렸어요");
-  };
+  // ⬆️ 끌올 (11-06): 같은 공고를 지금 내용 그대로 채널 맨 아래로 — 번호·지원자 그대로
+  $("#bump") && ($("#bump").onclick = (e) => {
+    const b = e.currentTarget;
+    if (b.disabled) return; // 두 번 눌러도 한 번만
+    const go = () => { b.disabled = true; b.textContent = "올리는 중…"; act(() => api("bump", { id }), "⬆️ 채널 맨 아래로 끌올했어요"); };
+    tg?.showConfirm ? tg.showConfirm(`채널 맨 아래로 끌올할까요?${j.closed ? " (모집 완료 → 다시 모집 중으로 바뀌어요)" : ""}`, (ok) => ok && go()) : go();
+  });
   document.querySelectorAll("[data-att]").forEach((b) => (b.onclick = () => { const cur = b.classList.contains("on"); act(() => api("att", { id, uid: b.dataset.uid, r: cur ? null : b.dataset.att }), cur ? "지웠어요" : b.dataset.att === "ok" ? "✅ 출근" : "❌ 빵꾸"); }));
   document.querySelectorAll("[data-nocancel]").forEach((b) => (b.onclick = () => {
     const go = () => act(() => api("nocancel", { id, uid: b.dataset.nocancel }), "🚫 빵꾸로 기록하고 자리를 다시 열었어요");

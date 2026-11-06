@@ -14,6 +14,7 @@ import {
   closeJob,
   reopenJob,
   repostJob,
+  bumpJob,
   setAttendance,
   jobApplicants,
   sendJobOut,
@@ -57,7 +58,7 @@ export function verify(initData) {
 const first = (job) => (job.text ?? job.caption ?? "").split("\n")[0].slice(0, 60);
 const allJobs = async () => {
   const ids = (await kv.smembers("jobs")) ?? [];
-  return (await kv.mget(ids.map((id) => `job:${id}`))).filter(Boolean).sort((a, b) => b.id - a.id);
+  return (await kv.mget(ids.map((id) => `job:${id}`))).filter(Boolean).sort((a, b) => (b.bumpedAt ?? b.at ?? 0) - (a.bumpedAt ?? a.at ?? 0) || b.id - a.id); // 끌올한 공고가 위로
 };
 const allStudents = async () => {
   const ids = (await kv.smembers("apps")) ?? [];
@@ -108,6 +109,8 @@ async function jobView(job) {
     attOk: Object.values(att).filter((r) => r === "ok").length,
     attNo: Object.values(att).filter((r) => r === "no").length,
     repostOf: job.repostOf ?? null,
+    bumpedAt: job.bumpedAt ?? null,
+    bumps: job.bumps ?? 0,
     form: job.form ?? null,
     media: job.media ?? [],
     textJob: job.text != null, // 글로 만든 공고만 사진·영상을 바꿀 수 있음
@@ -246,6 +249,12 @@ const ADMIN = {
     const job = await kv.get(`job:${id}`);
     if (!job) throw new Error("공고를 찾을 수 없어요");
     await reopenJob(bot.api, job, await botName());
+    return { ok: true };
+  },
+  async bump({ id }) {
+    const job = await kv.get(`job:${id}`);
+    if (!job) throw new Error("공고를 찾을 수 없어요");
+    await bumpJob(bot.api, job, await botName());
     return { ok: true };
   },
   async repost({ id, slots }) {
