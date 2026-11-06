@@ -469,14 +469,19 @@ const placeJobCard = (j) => `
     ${timeLabel(j) || payLabel(j) ? `<div class="muted">${esc([timeLabel(j), payLabel(j)].filter(Boolean).join(" · "))}</div>` : ""}
     <div style="font-size:13px;margin-top:4px">${j.closed ? `배치 ${j.placed.length}명${j.notified.length ? ` · 안내 ${j.notified.length}명` : ""}` : `지원 ${Math.max(0, j.applied - j.placed.length)}명 · 배치 ${j.placed.length}${j.slots ? ` / ${j.slots}명` : "명"}`}${workingN(j) ? ` · <b style="color:var(--ok)">근무 중 ${workingN(j)}명</b>` : ""}</div>
   </div>`;
-const MORE = {};
+const MORE = {}, PULL = {};
 function renderPlace(id) {
   if (id === "none") {
     const loose = DATA.jobs.filter((j) => !placeOf(j));
     $("#view").innerHTML = `<button class="back" onclick="location.hash=''">‹ 업장 목록</button>
-      <div class="card"><b style="font-size:17px">📂 업장 없는 공고</b><div class="muted">공고를 누르고 [더보기] → 업장 연결로 옮길 수 있어요</div></div>
-      ${loose.map(placeJobCard).join("") || `<div class="empty">없어요</div>`}`;
-    document.querySelectorAll("[data-pjob]").forEach((c) => (c.onclick = () => (location.hash = `job=${c.dataset.pjob}`)));
+      <div class="card"><b style="font-size:17px">📂 업장 없는 공고</b><div class="muted">공고마다 아래 칸에서 업장을 고르면 바로 그 업장으로 옮겨져요</div></div>
+      ${loose.map((j) => placeJobCard(j).replace(/<\/div>\s*$/, `<select data-mv="${j.id}" style="margin-top:8px;padding:8px"><option value="">🏢 업장으로 옮기기…</option>${(DATA.places ?? []).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></div>`)).join("") || `<div class="empty">없어요</div>`}
+      ${(DATA.places ?? []).length ? "" : `<div class="empty">먼저 🏢 업장 탭에서 업장을 등록해 주세요</div>`}`;
+    document.querySelectorAll("[data-pjob]").forEach((c) => (c.onclick = (e) => { if (e.target.closest("select")) return; location.hash = `job=${c.dataset.pjob}`; }));
+    document.querySelectorAll("[data-mv]").forEach((sel) => (sel.onchange = async () => {
+      if (!sel.value) return;
+      try { haptic(); await api("jobPlace", { id: sel.dataset.mv, placeId: sel.value }); toast("🏢 옮겼어요"); await load(); renderPlace("none"); } catch (e) { toast("⚠️ " + e.message); }
+    }));
     return;
   }
   const p = (DATA.places ?? []).find((x) => String(x.id) === String(id));
@@ -485,6 +490,7 @@ function renderPlace(id) {
   const now = js.reduce((s, j) => s + workingN(j), 0), today = js.reduce((s, j) => s + todayN(j), 0);
   const past = new Set(js.filter((j) => j.closed).flatMap((j) => j.placed)).size;
   const more = MORE["p" + p.id];
+  const loose = DATA.jobs.filter((j) => !placeOf(j));
   $("#view").innerHTML = `
     <button class="back" onclick="location.hash=''">‹ 업장 목록</button>
     <div class="card">
@@ -500,7 +506,12 @@ function renderPlace(id) {
       <div class="btns"><button class="btn ghost sm" id="plEdit" style="flex:1">✏️ 업장 정보 고치기</button><button class="btn red sm" id="plDel">🗑 업장 지우기</button></div>` : ""}
       <button class="more" id="plMore">${more ? "접기 ▲" : "더보기 ▼"}</button>
     </div>
-    <div class="row" style="margin:14px 2px 8px"><b class="sp" style="font-size:15px">공고 ${js.length}개</b><button class="btn sm" id="addJob">＋ 공고 추가</button></div>
+    <div class="row" style="margin:14px 2px 8px"><b class="sp" style="font-size:15px">공고 ${js.length}개</b>${loose.length ? `<button class="btn ghost sm" id="pull">📥 기존 공고 가져오기</button>` : ""}<button class="btn sm" id="addJob">＋ 공고 추가</button></div>
+    ${PULL[p.id] ? `<div class="card" style="border:1.5px solid var(--btn)">
+      <b>📥 업장 없는 공고에서 가져오기</b><div class="muted">이 업장 공고를 골라 주세요 (여러 개 가능)</div>
+      ${loose.map((j) => `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)"><input type="checkbox" data-pick="${j.id}" style="width:20px;height:20px;margin-top:2px"><span>#${j.id} ${esc(j.title)}<br><span class="muted">${esc(j.dateLabel || whenLabel(j))} · 지원 ${j.applied}명${j.closed ? " · 모집 완료" : ""}</span></span></label>`).join("")}
+      <div class="btns"><button class="btn ghost sm" id="pullNo">닫기</button><button class="btn sm" id="pullGo" style="flex:1">골라서 가져오기</button></div>
+    </div>` : ""}
     ${js.map(placeJobCard).join("") || `<div class="empty">아직 공고가 없어요.<br>[＋ 공고 추가]로 이 업장의 첫 공고를 만들어요<br><span class="muted">(오전조·주말조처럼 근무 파트마다 따로 만들어 두면 편해요)</span></div>`}`;
   $("#plMore").onclick = () => { MORE["p" + p.id] = !more; renderPlace(id); };
   $("#plEdit") && ($("#plEdit").onclick = () => (location.hash = `placeEdit=${p.id}`));
@@ -508,6 +519,14 @@ function renderPlace(id) {
     try { await api("placeDel", { id: p.id }); toast("🗑 업장을 지웠어요"); await load(); location.hash = ""; } catch (e) { toast("⚠️ " + e.message); }
   }));
   $("#addJob").onclick = () => startNew(p);
+  $("#pull") && ($("#pull").onclick = () => { PULL[p.id] = !PULL[p.id]; renderPlace(id); });
+  $("#pullNo") && ($("#pullNo").onclick = () => { PULL[p.id] = false; renderPlace(id); });
+  $("#pullGo") && ($("#pullGo").onclick = async (e) => {
+    const ids = [...document.querySelectorAll("[data-pick]:checked")].map((x) => x.dataset.pick);
+    if (!ids.length) return toast("가져올 공고를 골라 주세요");
+    e.currentTarget.disabled = true;
+    try { haptic(); for (const jid of ids) await api("jobPlace", { id: jid, placeId: p.id }); PULL[p.id] = false; toast(`📥 ${ids.length}개를 가져왔어요`); await load(); renderPlace(id); } catch (err) { toast("⚠️ " + err.message); e.currentTarget.disabled = false; }
+  });
   document.querySelectorAll("[data-pjob]").forEach((c) => (c.onclick = () => (location.hash = `job=${c.dataset.pjob}`)));
 }
 // 🏢 업장 등록·고치기
