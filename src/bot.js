@@ -342,6 +342,7 @@ const cardKeyboardBase = (id) =>
     .text("🟢 연결완료", `a:st:introduced:${id}`)
     .row()
     .text("🔄 수업 요일 다시 받기", `a:days:${id}`)
+    .text("💬 대화", `a:who:${id}`)
     .row()
     .webApp("📋 관리 화면에서 보기", adminAppUrl(`stu=${id}`) ?? "https://t.me");
 
@@ -1063,6 +1064,24 @@ bot.callbackQuery(/^f:k:(urgent|normal)$/, async (ctx) => {
 });
 
 bot.callbackQuery("f:noop", (ctx) => ctx.answerCallbackQuery());
+// 💬 학생과 1:1 (출근 확인 이름·지원자 카드 [💬 대화]) — @아이디 없는 학생은 t.me 주소를 못 만들어서 방법을 골라 줌
+const krPhoneLink = (p) => { const d = String(p || "").replace(/\D/g, ""); return /^010\d{8}$/.test(d) ? `https://t.me/+82${d.slice(1)}` : null; };
+bot.callbackQuery(/^a:who:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  const uid = Number(ctx.match[1]);
+  const app = (await kv.get(K.app(uid))) ?? (await kv.get(`guest:${uid}`)) ?? { id: uid, name: `#${uid}` };
+  await ctx.answerCallbackQuery();
+  const kb = new InlineKeyboard();
+  if (app.username) kb.url("💬 텔레그램 대화 열기", `https://t.me/${app.username}`);
+  else if (krPhoneLink(app.phone)) kb.url("📱 전화번호로 텔레그램 열기", krPhoneLink(app.phone));
+  if (adminAppUrl()) kb.row().webApp("🤖 봇으로 메시지 보내기 (관리 화면)", adminAppUrl(`stu=${uid}`));
+  await ctx.reply(
+    [`💬 <b>${esc(app.name)}</b>${app.phone ? ` · 📞 <code>${esc(app.phone)}</code>` : ""}`,
+      app.username ? "" : "텔레그램 아이디(@)가 없는 학생이에요. 전화번호로 열거나(학생이 번호 공개를 막아 두면 안 열림), 관리 화면 학생 카드 [💬 학생과 대화] → 봇으로 보내기를 쓰세요.",
+      `<a href="tg://user?id=${uid}">👤 프로필 열기</a>`].filter(Boolean).join("\n"),
+    { ...html, reply_markup: kb },
+  );
+});
 bot.callbackQuery(/^f:(o|t|c|g|n|i):(\w+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
   await ctx.answerCallbackQuery();
@@ -1911,7 +1930,9 @@ const attKeyboard = (job, apps) => {
   const kb = new InlineKeyboard();
   apps.forEach((a, i) => {
     const r = job.att?.[a.id];
-    kb.text(`${i + 1}. ${attMark(r)} ${a.name}`, "f:noop")
+    // 이름 누르면 그 학생과 1:1 (11-09 대표): @아이디 있으면 바로 텔레그램 대화, 없으면 연락 방법 안내(a:who)
+    const label = `${i + 1}. ${attMark(r)} ${a.name} 💬`;
+    (a.username ? kb.url(label, `https://t.me/${a.username}`) : kb.text(label, `a:who:${a.id}`))
       .row()
       .text(r === "ok" ? "● ✅ 출근" : "✅ 출근", `a:att:${job.id}:${a.id}:ok`)
       .text(r === "no" ? "● ❌ 빵꾸" : "❌ 빵꾸", `a:att:${job.id}:${a.id}:no`)
