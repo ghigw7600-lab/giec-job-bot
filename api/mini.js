@@ -39,6 +39,7 @@ import {
   placeStudent,
   finishJob,
   attendees,
+  sendWho,
 } from "../src/bot.js";
 import { tx, langOf, KO, langName } from "../src/text.js";
 
@@ -273,6 +274,11 @@ const ADMIN = {
     await bot.api.sendMessage(Number(uid), `💬 <b>GIEC JOB</b>\n\n${e(t)}`, { parse_mode: "HTML" }).catch(() => {
       throw new Error("못 보냈어요 — 학생이 봇을 막았거나 봇 대화를 지웠어요");
     });
+    return { ok: true };
+  },
+  // 👤 프로필 링크를 봇 대화로 보내 줌 (미니앱에서는 tg:// 링크를 직접 못 열어서)
+  async who({ uid }) {
+    await sendWho(bot.api, this.user.id, Number(uid));
     return { ok: true };
   },
   async del({ uids }) {

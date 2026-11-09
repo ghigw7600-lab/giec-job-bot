@@ -1066,21 +1066,27 @@ bot.callbackQuery(/^f:k:(urgent|normal)$/, async (ctx) => {
 bot.callbackQuery("f:noop", (ctx) => ctx.answerCallbackQuery());
 // 💬 학생과 1:1 (출근 확인 이름·지원자 카드 [💬 대화]) — @아이디 없는 학생은 t.me 주소를 못 만들어서 방법을 골라 줌
 const krPhoneLink = (p) => { const d = String(p || "").replace(/\D/g, ""); return /^010\d{8}$/.test(d) ? `https://t.me/+82${d.slice(1)}` : null; };
-bot.callbackQuery(/^a:who:(\d+)$/, async (ctx) => {
-  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
-  const uid = Number(ctx.match[1]);
+// 그룹방에 있는 학생은 관리자 텔레그램이 이미 알고 있어서 프로필 링크(tg://user?id)로 바로 열림 (11-09 대표: 이 방식으로)
+export async function sendWho(api, to, uid) {
+  uid = Number(uid);
   const app = (await kv.get(K.app(uid))) ?? (await kv.get(`guest:${uid}`)) ?? { id: uid, name: `#${uid}` };
-  await ctx.answerCallbackQuery();
   const kb = new InlineKeyboard();
   if (app.username) kb.url("💬 텔레그램 대화 열기", `https://t.me/${app.username}`);
   else if (krPhoneLink(app.phone)) kb.url("📱 전화번호로 텔레그램 열기", krPhoneLink(app.phone));
   if (adminAppUrl()) kb.row().webApp("🤖 봇으로 메시지 보내기 (관리 화면)", adminAppUrl(`stu=${uid}`));
-  await ctx.reply(
+  await api.sendMessage(
+    to,
     [`💬 <b>${esc(app.name)}</b>${app.phone ? ` · 📞 <code>${esc(app.phone)}</code>` : ""}`,
-      app.username ? "" : "텔레그램 아이디(@)가 없는 학생이에요. 전화번호로 열거나(학생이 번호 공개를 막아 두면 안 열림), 관리 화면 학생 카드 [💬 학생과 대화] → 봇으로 보내기를 쓰세요.",
-      `<a href="tg://user?id=${uid}">👤 프로필 열기</a>`].filter(Boolean).join("\n"),
+      "",
+      `👉 <a href="tg://user?id=${uid}"><b>프로필 열기 → 메시지 보내기</b></a>`,
+      app.username ? "" : "<i>(텔레그램 아이디가 없는 학생 — 그룹방에 있으면 위 프로필이 열려요. 안 열리면 아래 버튼으로)</i>"].filter(Boolean).join("\n"),
     { ...html, reply_markup: kb },
   );
+}
+bot.callbackQuery(/^a:who:(\d+)$/, async (ctx) => {
+  if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  await sendWho(ctx.api, ctx.from.id, ctx.match[1]);
 });
 bot.callbackQuery(/^f:(o|t|c|g|n|i):(\w+)$/, async (ctx) => {
   if (!isAdmin(ctx.from.id)) return ctx.answerCallbackQuery();
@@ -1221,16 +1227,16 @@ const jobDate = (job) => (job.off == null ? null : job.dateLabel);
 // 그룹방용 (여러 나라 학생이 같이 봄 → 짧게 3개 언어)
 function groupBody(job, closed = false) {
   // (11-04) 채널 공고는 한글만 — 학생은 텔레그램 번역 기능 사용. 혜승 양식 글을 그대로 올림
-  const head = job.kind === "urgent" ? "🚨 <b>급구</b>" : null;
+  const head = job.kind === "urgent" ? "🚨 <b>Shoshilinch!</b>" : null; // (11-09) 채널 공고 고정 문구 = 우즈벡어
   const body = job.text != null ? job.text : job.caption ?? "";
   return [
-    closed ? "✅ <b>[모집 완료]</b>" : head,
+    closed ? "✅ <b>[Qabul yakunlandi]</b>" : head,
     jobDate(job) ? `📅 ${jobDate(job)}` : null,
     ...jobMeta(job),
     "",
     esc(body),
     "",
-    closed ? null : "👇 아래 [지원하기] 버튼을 눌러 주세요",
+    closed ? null : "👇 Pastdagi [🙋 Ariza berish] tugmasini bosing",
   ]
     .filter((x) => x !== null)
     .join("\n")
@@ -1249,8 +1255,8 @@ const boardLink = (username) => `https://t.me/${username}?startapp=jobs`; // 채
 let meNameCache = null;
 const meName = async (api) => (meNameCache ??= (await api.getMe().catch(() => null))?.username ?? null);
 const groupMarkup = (username, jobId) =>
-  new InlineKeyboard().url("🙋 지원하기", `https://t.me/${username}?start=job_${jobId}`).row().url("💼 다른 일자리 보기", boardLink(username));
-const closedMarkup = (username) => (username ? new InlineKeyboard().url("💼 다른 일자리 보기", boardLink(username)) : { inline_keyboard: [] });
+  new InlineKeyboard().url("🙋 Ariza berish", `https://t.me/${username}?start=job_${jobId}`).row().url("💼 Boshqa ishlar", boardLink(username));
+const closedMarkup = (username) => (username ? new InlineKeyboard().url("💼 Boshqa ishlar", boardLink(username)) : { inline_keyboard: [] });
 
 // 📷 사진·영상 붙은 공고 (11-05 혜승 요청): 1개 + 글 1024자 이내 → 사진 아래 글·버튼 한 장 / 여러 개 → 앨범(묶음) 먼저, 그 아래 글·버튼
 const mediaInput = (m, caption) => ({ type: m.type === "video" ? "video" : "photo", media: m.id, ...(caption ? { caption, parse_mode: "HTML" } : {}) });
@@ -1370,7 +1376,7 @@ bot.callbackQuery("md:clear", async (ctx) => {
 export const capOf = (j) => j.cap ?? j.slots ?? null;
 export async function createJobRecord({ kind = "normal", off = null, text, slots, cap = null, by, ids = [], form = null, media = [], placeId = null }) {
   const id = await kv.incr("jobseq");
-  const m = /(\d{1,3})\s*명/.exec(text ?? "");
+  const m = /(\d{1,3})\s*(?:명|nafar)/.exec(text ?? "");
   const job = {
     id,
     kind,
@@ -1503,7 +1509,7 @@ export async function bumpJob(api, job, username) {
     const gone = await api.deleteMessage(old.chat, old.msgId).then(() => true).catch(() => false);
     for (const a of old.album ?? []) await api.deleteMessage(old.chat, a).catch(() => {});
     if (!gone) {
-      const note = "⬆️ <b>이 공고는 아래로 끌올됐어요</b> — 맨 아래 새 글에서 지원해 주세요";
+      const note = "⬆️ <b>Bu e'lon pastga ko'chirildi</b> — pastdagi yangi e'lon orqali ariza bering";
       const mk = closedMarkup(username);
       await (job.text != null && !old.caption
         ? api.editMessageText(old.chat, old.msgId, note, { parse_mode: "HTML", reply_markup: mk })
@@ -1544,8 +1550,8 @@ async function postRemaining(api, job, left) {
   if (!job.group) return;
   if (job.cap && left > 0) return; // 지원서 정원이 있으면 학생은 정원을 모르게 — "N명 남았습니다" 안 달고, 다 차면 "모집 완료"만
   const text = left > 0
-    ? `🔔 <b>${left}명 남았습니다</b>`
-    : "✅ <b>완료</b>";
+    ? `🔥 <b>Faqat ${left} ta joy qoldi!</b>`
+    : "✅ <b>Yakunlandi</b>";
   await api
     .sendMessage(job.group.chat, text, { parse_mode: "HTML", disable_notification: true, reply_parameters: { message_id: job.group.msgId, allow_sending_without_reply: true } })
     .catch(() => {});

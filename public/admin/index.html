@@ -229,39 +229,45 @@ const todayISO = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 
 const isoDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WD[d.getUTCDay()]})`; };
 const isoOff = (iso) => Math.round((Date.parse(iso + "T00:00:00Z") - Date.parse(todayISO() + "T00:00:00Z")) / 864e5);
 const won = (v) => { const n = String(v ?? "").replace(/[^\d]/g, ""); return n ? Number(n).toLocaleString("ko-KR") + "원" : ""; };
+// 📢 공고 글 = 고정 항목은 우즈벡어로 (11-09 대표 결정: 우즈벡어로 올릴 때 반응이 더 좋음, 한국어는 길어져서 뺌)
+//   혜승이가 쓰는 칸(제목·업무·주소·지급일)은 쓴 그대로 올라감. 우즈벡어 문구는 칸 확인 필요
+const UZ_DAY = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba"];
+const UZ_WD = ["Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya"];
+const uzDay = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()} (${UZ_WD[(d.getUTCDay() + 6) % 7]})`; };
+const von = (v) => { const n = String(v ?? "").replace(/[^\d]/g, ""); return n ? Number(n).toLocaleString("en-US") + " von" : ""; };
+const UZ_PAY = { 시간제: "Soatbay", 주급제: "Haftalik", 월급제: "Oylik" };
 function composeJob() {
   const d = [...F.days].sort((a, b) => a - b);
   const wd = d.filter((x) => x < 5), we = d.filter((x) => x >= 5);
-  const name = (xs) => xs.map((x) => DAYS[x] + "요일").join(" · ");
+  const name = (xs) => xs.map((x) => UZ_DAY[x]).join(" · ");
   const off = DAYS.map((_, i) => i).filter((i) => !d.includes(i));
   const time = (s, e) => (s || e ? `${s || "?"} ~ ${e || "?"}` : "");
   const L = [];
-  L.push(`📢 [GIEC JOB] ${F.title.trim() || "(제목)"} 모집!`);
-  if (F.task.trim()) L.push(`🧺 업무: ${F.task.trim()}`);
-  if (F.count) L.push(`${F.sex === "여성" ? "👩" : F.sex === "남성" ? "👨" : "👥"} 모집인원: ${F.sex ? F.sex + " " : ""}${F.count}명`);
-  if (F.addr.trim()) L.push("📍 근무 위치", F.addr.trim());
-  L.push("━━━━━━━━━━━━━━", "⏰ 근무 조건");
+  L.push(`📢 [GIEC JOB] ${F.title.trim() || "(sarlavha)"} — ishchilar kerak!`);
+  if (F.task.trim()) L.push(`🧺 Ish turi: ${F.task.trim()}`);
+  if (F.count) L.push(`${F.sex === "여성" ? "👩" : F.sex === "남성" ? "👨" : "👥"} Ishchilar soni: ${F.count} nafar${F.sex === "여성" ? " ayol" : F.sex === "남성" ? " erkak" : ""}`);
+  if (F.addr.trim()) L.push(`📍 Ish joyi: ${F.addr.trim()}`);
+  L.push("━━━━━━━━━━━━━━", "⏰ Ish sharoitlari");
+  const pay = () => {
+    L.push("━━━━━━━━━━━━━━", "💰 Maosh shartlari");
+    if (F.payType === "월급제") { if (F.wdPay) L.push(`💵 Oylik maosh: ${von(F.wdPay)}`); }
+    else if (F.splitPay && F.wePay) { if (F.wdPay) L.push(`💵 Hafta ichi soatlik: ${von(F.wdPay)}`); L.push(`💵 Hafta oxiri soatlik: ${von(F.wePay)}`); }
+    else if (F.wdPay) L.push(`💵 Soatlik ish haqi: ${von(F.wdPay)}`);
+    if (F.payType) L.push(`💳 To'lov turi: ${UZ_PAY[F.payType] ?? F.payType}`);
+    if (F.payDay.trim()) L.push(`📅 Maosh beriladigan kun: ${F.payDay.trim()}`);
+  };
   if (F.payType === "시간제") {
     const ds = [...(F.dates ?? [])].sort();
-    if (ds.length) L.push(`📅 근무일: ${ds.map(isoDay).join(" · ")}${ds.length > 1 ? ` (총 ${ds.length}일)` : ""}`);
-    if (time(F.wdS, F.wdE)) L.push(`🕘 근무시간: ${time(F.wdS, F.wdE)}`);
-    L.push("━━━━━━━━━━━━━━", "💰 급여 조건");
-    if (F.splitPay && F.wePay) { if (F.wdPay) L.push(`평일 시급: ${won(F.wdPay)}`); L.push(`주말 시급: ${won(F.wePay)}`); }
-    else if (F.wdPay) L.push(`시급: ${won(F.wdPay)}`);
-    L.push("급여 방식: 시간제");
-    if (F.payDay.trim()) L.push(`급여 지급일: ${F.payDay.trim()}`);
+    if (ds.length) L.push(`📅 Ish kunlari: ${ds.map(uzDay).join(" · ")}${ds.length > 1 ? ` (jami ${ds.length} kun)` : ""}`);
+    if (time(F.wdS, F.wdE)) L.push(`🕘 Ish vaqti: ${time(F.wdS, F.wdE)}`);
+    pay();
     return L.join("\n");
   }
-  if (d.length) { L.push(`📅 근무요일: 주 ${d.length}일`, name(d)); if (off.length) L.push(`휴무: ${name(off)}`); }
-  if (wd.length && time(F.wdS, F.wdE)) L.push("🕘 평일 근무시간", `${name(wd)}: ${time(F.wdS, F.wdE)}`);
-  if (we.length && time(F.weS, F.weE)) L.push("🕙 주말 근무시간", `${name(we)}: ${time(F.weS, F.weE)}`);
-  if (!d.length && time(F.wdS, F.wdE)) L.push(`🕘 근무시간: ${time(F.wdS, F.wdE)}`);
-  L.push("━━━━━━━━━━━━━━", "💰 급여 조건");
-  if (F.payType === "월급제") { if (F.wdPay) L.push(`월급: ${won(F.wdPay)}`); }
-  else if (F.splitPay && F.wePay) { if (F.wdPay) L.push(`평일 시급: ${won(F.wdPay)}`); L.push(`주말 시급: ${won(F.wePay)}`); }
-  else if (F.wdPay) L.push(`시급: ${won(F.wdPay)}`);
-  if (F.payType) L.push(`급여 방식: ${F.payType}`);
-  if (F.payDay.trim()) L.push(`급여 지급일: ${F.payDay.trim()}`);
+  if (d.length) { L.push(`📅 Ish kunlari: Haftasiga ${d.length} kun`, name(d)); if (off.length) L.push(`🏠 Dam olish kunlari: ${name(off)}`); }
+  if (wd.length && time(F.wdS, F.wdE)) L.push("🕘 Hafta ichi ish vaqti", `${name(wd)}: ${time(F.wdS, F.wdE)}`);
+  if (we.length && time(F.weS, F.weE)) L.push("🕙 Hafta oxiri ish vaqti", `${name(we)}: ${time(F.weS, F.weE)}`);
+  if (!d.length && time(F.wdS, F.wdE)) L.push(`🕘 Ish vaqti: ${time(F.wdS, F.wdE)}`);
+  pay();
   return L.join("\n");
 }
 
@@ -373,12 +379,14 @@ function openChat(uid) {
   box.innerHTML = `<div class="modal"><div class="card">
     <b style="font-size:16px">💬 ${esc(c.name ?? "")}</b>
     <div class="muted" style="margin:4px 0 10px">텔레그램 아이디(@)가 없는 학생이에요</div>
-    ${ph ? `<button class="btn big" id="chPhone">📱 전화번호로 텔레그램 열기</button><div class="muted" style="font-size:12px;margin:4px 0 12px">학생이 번호 공개를 막아 두면 안 열릴 수 있어요 → 그때는 아래 봇으로</div>` : ""}
+    <button class="btn big" id="chWho" style="margin-bottom:6px">👤 텔레그램 프로필로 연락</button><div class="muted" style="font-size:12px;margin:0 0 12px">봇 대화에 프로필 링크를 보내고 그쪽으로 넘어가요 (그룹방에 있는 학생이면 바로 열려요)</div>
+    ${ph ? `<button class="btn ghost big" id="chPhone">📱 전화번호로 텔레그램 열기</button><div class="muted" style="font-size:12px;margin:4px 0 12px">학생이 번호 공개를 막아 두면 안 열릴 수 있어요 → 그때는 아래 봇으로</div>` : ""}
     <textarea id="chText" style="min-height:90px" placeholder="학생에게 보낼 말 (봇이 대신 보내요)"></textarea>
     <div class="muted" style="font-size:12px;margin-top:4px">학생이 봇에 답장하면 봇이 나한테 전달해 줘요</div>
     <div class="btns"><button class="btn ghost" id="chNo" style="flex:1">닫기</button><button class="btn green" id="chSend" style="flex:2">🤖 봇으로 보내기</button></div>
   </div></div>`;
   $("#chNo").onclick = () => (box.innerHTML = "");
+  $("#chWho").onclick = async () => { try { haptic(); await api("who", { uid }); box.innerHTML = ""; toast("👤 봇 대화에 프로필 링크를 보냈어요"); setTimeout(() => tg?.close?.(), 600); } catch (err) { toast("⚠️ " + err.message); } };
   $("#chPhone") && ($("#chPhone").onclick = () => { box.innerHTML = ""; tg?.openTelegramLink(`https://t.me/${ph}`); });
   $("#chSend").onclick = async (e) => {
     const t = $("#chText").value.trim();
@@ -938,7 +946,7 @@ function renderNew() {
     </div>` : `<div class="card">
       <div class="row"><b class="sp">📢 공고 칸 채우기</b><button class="btn ghost sm" id="past" type="button">📋 지난 공고 불러오기</button></div>
       ${NEW.pastOpen ? `<div class="scrolly" style="margin:8px 0;max-height:260px;border:1px solid var(--line);border-radius:10px;padding:6px">${(DATA.jobs ?? []).filter((j) => j.text).slice(0, 30).map((j) => `<button class="card" data-past="${j.id}" style="display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px;color:var(--text);border:1px solid var(--line);font:inherit"><b>#${j.id}</b> ${esc(j.title)} <span class="muted">${j.dateLabel ?? ""}${j.form ? "" : " · 글로 불러옴"}</span></button>`).join("") || `<div class="muted">지난 공고가 없어요</div>`}</div>` : ""}
-      <label class="f">제목 <span class="muted">"… 모집!" 앞</span></label><input data-f="title" placeholder="빨래공장 여성 근로자" value="${esc(F.title)}">
+      <label class="f">제목 <span class="muted">"— ishchilar kerak!" 앞 · 우즈벡어로 쓰면 그대로 올라가요</span></label><input data-f="title" placeholder="Kir yuvish fabrikasi" value="${esc(F.title)}">
       <label class="f">🧺 업무</label><input data-f="task" placeholder="세탁공장 근무" value="${esc(F.task)}">
       <label class="f">👩 모집인원</label>
       <div class="row" style="gap:6px"><div class="chips" style="margin:0">${["", "여성", "남성"].map((x) => `<button class="chip ${F.sex === x ? "on" : ""}" data-sex="${x}">${x || "무관"}</button>`).join("")}</div>
